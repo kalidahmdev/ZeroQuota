@@ -1,0 +1,84 @@
+{
+  "name": "zeroquota",
+  "displayName": "ZeroQuota",
+  "description": "Premium AI quota monitoring and hands-free terminal automation for Antigravity IDE.",
+  "version": "1.0.0",
+  "publisher": "antigravity",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "zeroquota.refresh",
+        "title": "ZeroQuota: Refresh Quota",
+        "category": "ZeroQuota"
+      },
+      {
+        "command": "zeroquota.toggleAutoAccept",
+        "title": "ZeroQuota: Toggle Hands-free Mode",
+        "category": "ZeroQuota"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "zeroquota-explorer",
+          "title": "ZeroQuota",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "zeroquota-explorer": [
+        {
+          "type": "webview",
+          "id": "zeroquota.dashboard",
+          "name": "Dashboard"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ZeroQuota",
+      "properties": {
+        "zeroquota.autoUpdateInterval": {
+          "type": "integer",
+          "default": 60,
+          "description": "Polling interval in seconds for quota updates."
+        },
+        "zeroquota.autoAccept": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically approve terminal commands and file edits."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@types/node": "20.x",
+    "@typescript-eslint/eslint-plugin": "^7.14.1",
+    "@typescript-eslint/parser": "^7.14.1",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.5",
+    "@vscode/test-electron": "^2.4.0"
+  },
+  "dependencies": {
+    "axios": "^1.7.2"
+  }
+}
