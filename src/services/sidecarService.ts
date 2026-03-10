@@ -1,4 +1,3 @@
-import * as vscode from "vscode";
 import { exec } from "child_process";
 import { promisify } from "util";
 import axios from "axios";
@@ -26,7 +25,7 @@ export interface UserStatus {
 }
 
 export class SidecarService {
-  constructor(private context: vscode.ExtensionContext) {}
+  constructor() {}
 
   private async discoverServer(): Promise<{
     pid: string;

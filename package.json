@@ -22,26 +22,32 @@
         "category": "ZeroQuota"
       },
       {
-        "command": "zeroquota.toggleAutoAccept",
-        "title": "ZeroQuota: Toggle Hands-free Mode",
+        "command": "zeroquota.openBrain",
+        "title": "ZeroQuota: Open Brain Folder",
+        "category": "ZeroQuota"
+      },
+      {
+        "command": "zeroquota.openMcpConfig",
+        "title": "ZeroQuota: Open MCP Config",
         "category": "ZeroQuota"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "zeroquota-explorer",
+          "id": "zeroquota-sidebar",
           "title": "ZeroQuota",
-          "icon": "media/icon.svg"
+          "icon": "icons/ZeroQuota.svg"
         }
       ]
     },
     "views": {
-      "zeroquota-explorer": [
+      "zeroquota-sidebar": [
         {
           "type": "webview",
           "id": "zeroquota.dashboard",
-          "name": "Dashboard"
+          "name": "Dashboard",
+          "icon": "icons/ZeroQuota.svg"
         }
       ]
     },
@@ -52,11 +58,6 @@
           "type": "integer",
           "default": 60,
           "description": "Polling interval in seconds for quota updates."
-        },
-        "zeroquota.autoAccept": {
-          "type": "boolean",
-          "default": false,
-          "description": "Automatically approve terminal commands and file edits."
         }
       }
     }
@@ -70,15 +71,17 @@
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
-    "@types/vscode": "^1.90.0",
     "@types/node": "20.x",
+    "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^7.14.1",
     "@typescript-eslint/parser": "^7.14.1",
+    "@vscode/test-electron": "^2.4.0",
     "eslint": "^8.57.0",
-    "typescript": "^5.4.5",
-    "@vscode/test-electron": "^2.4.0"
+    "fantasticon": "^4.1.0",
+    "typescript": "^5.4.5"
   },
   "dependencies": {
+    "@vscode/codicons": "^0.0.44",
     "axios": "^1.7.2"
   }
 }
