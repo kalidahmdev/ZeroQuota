@@ -58,6 +58,38 @@
           "type": "integer",
           "default": 60,
           "description": "Polling interval in seconds for quota updates."
+        },
+        "zeroquota.notificationThreshold": {
+          "type": "integer",
+          "default": 25,
+          "description": "Percentage threshold to show quota warning notifications."
+        },
+        "zeroquota.modelPicker": {
+          "type": "object",
+          "default": {
+            "geminiPro": true,
+            "geminiFlash": true,
+            "claude": true,
+            "gptOss": true
+          },
+          "description": "Toggle visibility of specific model variants in the dashboard."
+        },
+        "zeroquota.refreshRate": {
+          "type": "string",
+          "enum": ["Real-time", "1m", "5m", "Manual"],
+          "default": "1m",
+          "description": "Polling frequency for quota updates."
+        },
+        "zeroquota.autoSyncBrain": {
+          "type": "boolean",
+          "default": true,
+          "description": "Periodically scan the Brain Directory for changes."
+        },
+        "zeroquota.historyWindow": {
+          "type": "string",
+          "enum": ["5h", "12h", "24h"],
+          "default": "12h",
+          "description": "Data density window for sparkline history."
         }
       }
     }

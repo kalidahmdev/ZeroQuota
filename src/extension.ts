@@ -35,8 +35,9 @@ export async function activate(context: vscode.ExtensionContext) {
   // Initial check for settings changes
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("zeroquota.autoUpdateInterval")) {
+      if (e.affectsConfiguration("zeroquota")) {
         orchestrator.startPolling();
+        orchestrator.refresh();
       }
     }),
   );

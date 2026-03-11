@@ -36,34 +36,43 @@ export class StatusBarManager {
     if (pro?.quotaInfo) {
       const pct = Math.round(pro.quotaInfo.remainingFraction * 100);
       const timer = this.formatResetTime(pro.quotaInfo.resetTime);
-      const emoji = this.getQuotaEmoji(pro.quotaInfo.remainingFraction);
-      parts.push(`${emoji} Pro ${pct}% ${timer}`);
+      parts.push(`Pro ${pct}% ${timer}`);
     }
 
     if (flash?.quotaInfo) {
       const pct = Math.round(flash.quotaInfo.remainingFraction * 100);
       const timer = this.formatResetTime(flash.quotaInfo.resetTime);
-      const emoji = this.getQuotaEmoji(flash.quotaInfo.remainingFraction);
-      parts.push(`${emoji} Flash ${pct}% ${timer}`);
+      parts.push(`Flash ${pct}% ${timer}`);
     }
 
     if (opus?.quotaInfo) {
       const timer = this.formatResetTime(opus.quotaInfo.resetTime);
-      const emoji = this.getQuotaEmoji(opus.quotaInfo.remainingFraction);
-      parts.push(`${emoji} Claude ${timer}`);
+      parts.push(`Claude ${timer}`);
     }
 
     this.statusBarItem.text = parts.join(" | ");
 
-    this.statusBarItem.color = undefined;
+    // Calculate minimum fraction across all tracked models to color the status bar text
+    let fractions: number[] = [];
+    if (pro?.quotaInfo) fractions.push(pro.quotaInfo.remainingFraction);
+    if (flash?.quotaInfo) fractions.push(flash.quotaInfo.remainingFraction);
+    if (opus?.quotaInfo) fractions.push(opus.quotaInfo.remainingFraction);
+    
+    let minFrac = 1.0;
+    if (fractions.length > 0) {
+        minFrac = Math.min(...fractions);
+    }
+
+    if (minFrac < 0.1) {
+        this.statusBarItem.color = new vscode.ThemeColor("errorForeground");
+    } else if (minFrac < 0.4) {
+        this.statusBarItem.color = new vscode.ThemeColor("charts.yellow");
+    } else {
+        this.statusBarItem.color = undefined;
+    }
+
     this.statusBarItem.tooltip = this.createTooltip(status);
     this.statusBarItem.show();
-  }
-
-  private getQuotaEmoji(fraction: number): string {
-    if (fraction > 0.4) return "🟩";
-    if (fraction > 0.2) return "🟨";
-    return "🟥";
   }
 
   private createTooltip(status: UserStatus): vscode.MarkdownString {
@@ -129,14 +138,10 @@ export class StatusBarManager {
         displayName = "Gemini Pro";
       } else if (m.label.includes("Gemini") && m.label.includes("Flash")) {
         displayName = "Gemini Flash";
-      } else if (m.label.includes("Claude") && m.label.includes("Opus")) {
+      } else if (m.label.includes("Claude")) {
         displayName = "Claude Opus 4.6";
-      } else if (m.label.includes("GPT-OSS") && m.label.includes("120B")) {
-        displayName = "GPT OSS 120B";
-      } else if (m.label.includes("Claude") && m.label.includes("Sonnet")) {
-        const hasOpus = status.modelConfigs.some(c => c.label.includes("Opus"));
-        if (hasOpus) continue;
-        displayName = "Claude Sonnet 4.6";
+      } else if (m.label.toLowerCase().includes("gpt")) {
+        displayName = "GPT OSS";
       } else {
         displayName = m.label.replace(/\(.*\)/, "").trim();
       }
@@ -152,7 +157,7 @@ export class StatusBarManager {
     }
 
     // Explictly Sort the Models
-    const sortOrder = ["Gemini Pro", "Gemini Flash", "Claude Opus 4.6", "GPT OSS 120B", "Claude Sonnet 4.6"];
+    const sortOrder = ["Gemini Pro", "Gemini Flash", "Claude Opus 4.6", "GPT OSS"];
     itemsToDisplay.sort((a, b) => {
        let idxA = sortOrder.indexOf(a.displayName);
        let idxB = sortOrder.indexOf(b.displayName);
@@ -162,7 +167,7 @@ export class StatusBarManager {
     });
 
     for (const item of itemsToDisplay) {
-      const statusColor = item.frac > 0.4 ? "#4ade80" : item.frac > 0.2 ? "#facc15" : "#f87171";
+      const statusColor = item.frac > 0.4 ? "#ccff00" : item.frac > 0.2 ? "#fbbf24" : "#f87171";
       const circleSvg = this.generateStatusCircle(statusColor);
       const progressBar = this.generateProgressBar(item.frac, statusColor);
       const brandIcon = this.getBrandIcon(item.displayName);
