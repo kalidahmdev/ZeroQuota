@@ -815,10 +815,10 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             </div>
             <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 16px; font-weight: 700; color: #ffffff;">Google AI Pro</span>
+                    <span style="font-size: 14px; font-weight: 700; color: #ffffff;">Account</span>
                     <span style="font-size: 10px; font-weight: 800; color: var(--neon-green); background: rgba(204, 255, 0, 0.1); border: 1px solid rgba(204, 255, 0, 0.3); padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">${tier}</span>
                 </div>
-                <span style="font-size: 13px; font-weight: 500; color: var(--text-muted);">${email}</span>
+                <span style="font-size: 11px; font-weight: 500; color: var(--text-muted);">${email}</span>
             </div>
         </div>
 

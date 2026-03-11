@@ -33,21 +33,30 @@ export class StatusBarManager {
 
     const parts: string[] = [];
 
+    const getEmoji = (frac: number) => {
+      if (frac < 0.1) return "🟥";
+      if (frac < 0.4) return "🟨";
+      return "🟩";
+    };
+
     if (pro?.quotaInfo) {
-      const pct = Math.round(pro.quotaInfo.remainingFraction * 100);
+      const frac = pro.quotaInfo.remainingFraction;
+      const pct = Math.round(frac * 100);
       const timer = this.formatResetTime(pro.quotaInfo.resetTime);
-      parts.push(`Pro ${pct}% ${timer}`);
+      parts.push(`${getEmoji(frac)} Pro ${pct}% ${timer}`);
     }
 
     if (flash?.quotaInfo) {
-      const pct = Math.round(flash.quotaInfo.remainingFraction * 100);
+      const frac = flash.quotaInfo.remainingFraction;
+      const pct = Math.round(frac * 100);
       const timer = this.formatResetTime(flash.quotaInfo.resetTime);
-      parts.push(`Flash ${pct}% ${timer}`);
+      parts.push(`${getEmoji(frac)} Flash ${pct}% ${timer}`);
     }
 
     if (opus?.quotaInfo) {
+      const frac = opus.quotaInfo.remainingFraction;
       const timer = this.formatResetTime(opus.quotaInfo.resetTime);
-      parts.push(`Claude ${timer}`);
+      parts.push(`${getEmoji(frac)} Claude ${timer}`);
     }
 
     this.statusBarItem.text = parts.join(" | ");
