@@ -1,9 +1,14 @@
 {
   "name": "zeroquota",
   "displayName": "ZeroQuota",
+  "icon": "icons/store-logo.png",
   "description": "Premium AI quota monitoring and hands-free terminal automation for Antigravity IDE.",
   "version": "1.0.0",
   "publisher": "antigravity",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/antigravity/zeroquota"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -76,7 +81,12 @@
         },
         "zeroquota.refreshRate": {
           "type": "string",
-          "enum": ["Real-time", "1m", "5m", "Manual"],
+          "enum": [
+            "Real-time",
+            "1m",
+            "5m",
+            "Manual"
+          ],
           "default": "1m",
           "description": "Polling frequency for quota updates."
         },
@@ -85,21 +95,21 @@
           "default": true,
           "description": "Periodically scan the Brain Directory for changes."
         },
-        "zeroquota.historyWindow": {
-          "type": "string",
-          "enum": ["5h", "12h", "24h"],
-          "default": "12h",
-          "description": "Data density window for sparkline history."
+        "zeroquota.notifyOnReset": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show a desktop notification when AI quotas are fully reset."
         }
       }
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run package",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
+    "package": "node esbuild.js --production",
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
@@ -108,6 +118,8 @@
     "@typescript-eslint/eslint-plugin": "^7.14.1",
     "@typescript-eslint/parser": "^7.14.1",
     "@vscode/test-electron": "^2.4.0",
+    "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.27.3",
     "eslint": "^8.57.0",
     "fantasticon": "^4.1.0",
     "typescript": "^5.4.5"

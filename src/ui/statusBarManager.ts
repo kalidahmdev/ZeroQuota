@@ -61,24 +61,7 @@ export class StatusBarManager {
 
     this.statusBarItem.text = parts.join(" | ");
 
-    // Calculate minimum fraction across all tracked models to color the status bar text
-    let fractions: number[] = [];
-    if (pro?.quotaInfo) fractions.push(pro.quotaInfo.remainingFraction);
-    if (flash?.quotaInfo) fractions.push(flash.quotaInfo.remainingFraction);
-    if (opus?.quotaInfo) fractions.push(opus.quotaInfo.remainingFraction);
-    
-    let minFrac = 1.0;
-    if (fractions.length > 0) {
-        minFrac = Math.min(...fractions);
-    }
-
-    if (minFrac < 0.1) {
-        this.statusBarItem.color = new vscode.ThemeColor("errorForeground");
-    } else if (minFrac < 0.4) {
-        this.statusBarItem.color = new vscode.ThemeColor("charts.yellow");
-    } else {
-        this.statusBarItem.color = undefined;
-    }
+    this.statusBarItem.color = undefined;
 
     this.statusBarItem.tooltip = this.createTooltip(status);
     this.statusBarItem.show();
@@ -91,45 +74,57 @@ export class StatusBarManager {
     // Root container with much wider fixed width and added padding for height
     md.appendMarkdown(`<div style="width: 500px; padding: 16px 8px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">`);
 
-    // Redesigned Premium Header with Logo
-    md.appendMarkdown(`<div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(5, 150, 105, 0.05) 100%); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 8px; padding: 14px 18px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">`);
-    
-    // Logo and Title Row
+    // Overall Header Container
+    md.appendMarkdown(`<div style="margin-bottom: 24px;">`);
+    md.appendMarkdown(`<table width="100%" style="width: 100%; border-collapse: collapse; margin: 0; padding: 0;">`);
+    md.appendMarkdown(`<tr>`);
+
+    // Left Side: Brand Logo and Text using nested table
+    md.appendMarkdown(`<td align="left" style="vertical-align: middle; text-align: left; width: 50%;">`);
+    md.appendMarkdown(`<table style="border-collapse: collapse; margin: 0; padding: 0;"><tr>`);
     const appLogo = this.getAppLogo();
-    md.appendMarkdown(`<table style="width: 100%; border-collapse: collapse;">`);
-    md.appendMarkdown(`<tr>`);
-    md.appendMarkdown(`<td style="width: 32px; vertical-align: middle;">`);
     if (appLogo) {
-      md.appendMarkdown(`<img src="${appLogo}" width="24" height="24" style="display: block;" />`);
+      md.appendMarkdown(`<td style="vertical-align: middle; padding-right: 8px;">`);
+      md.appendMarkdown(`<img src="${appLogo}" width="32" height="32" style="display: block;" />`);
+      md.appendMarkdown(`</td>`);
     } else {
-      md.appendMarkdown(`<span style="font-size: 18px;">✨</span>`);
+      md.appendMarkdown(`<td style="vertical-align: middle; padding-right: 8px;">`);
+      md.appendMarkdown(`<span style="font-size: 24px; line-height: 1;">✨</span>`);
+      md.appendMarkdown(`</td>`);
     }
-    md.appendMarkdown(`</td>`);
     md.appendMarkdown(`<td style="vertical-align: middle;">`);
-    md.appendMarkdown(`<h2 style="margin: 0; padding: 0; color: #34d399; font-weight: 900; letter-spacing: 0.5px; font-size: 16px; line-height: 24px;">`);
-    md.appendMarkdown(`ZEROQUOTA <span style="font-size: 11px; color: #9ca3af; font-weight: 500; background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; margin-left: 6px; vertical-align: middle;">v1.0.0</span>`);
-    md.appendMarkdown(`</h2>`);
+    md.appendMarkdown(`<strong style="color: #ffffff; font-size: 16px; letter-spacing: 0.5px;">ZEROQUOTA</strong>`);
     md.appendMarkdown(`</td>`);
-    md.appendMarkdown(`</tr>`);
-    md.appendMarkdown(`</table>`);
+    md.appendMarkdown(`</tr></table>`);
+    md.appendMarkdown(`</td>`);
 
-    // Divider
-    md.appendMarkdown(`<hr style="border: 0; height: 1px; background: rgba(16, 185, 129, 0.2); margin: 10px 0;" />`);
-
-    // User & Tier Line
-    md.appendMarkdown(`<table style="width: 100%; border-collapse: collapse;">`);
-    md.appendMarkdown(`<tr>`);
-    md.appendMarkdown(`<td style="color: #e2e8f0; font-size: 12px; font-weight: 500;">`);
-    md.appendMarkdown(`$(account) &nbsp;${status.email}`);
-    md.appendMarkdown(`</td>`);
-    md.appendMarkdown(`<td style="text-align: right;">`);
-    md.appendMarkdown(`<span style="color: #fbbf24; font-size: 11px; font-weight: 700; background: rgba(251, 191, 36, 0.15); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(251, 191, 36, 0.3);">`);
-    md.appendMarkdown(`$(star-full) &nbsp;${status.tier}`);
-    md.appendMarkdown(`</span>`);
-    md.appendMarkdown(`</td>`);
-    md.appendMarkdown(`</tr>`);
-    md.appendMarkdown(`</table>`);
+    // Right Side: Account Card using nested table
+    const accountIconSvg = this.generateAccountCircle();
+    md.appendMarkdown(`<td align="right" style="vertical-align: middle; text-align: right; width: 50%;">`);
     
+    // The nice block around Account details aligned strictly right
+    md.appendMarkdown(`<table align="right" style="border-collapse: collapse; margin: 0; padding: 0; float: right;"><tr>`);
+    
+    md.appendMarkdown(`<td align="right" style="vertical-align: middle; text-align: right; padding-right: 12px;">`);
+    md.appendMarkdown(`<div style="margin-bottom: 2px;">`);
+    md.appendMarkdown(`<strong style="font-size: 13px; color: #ffffff;">Account</strong>`);
+    md.appendMarkdown(`&nbsp;&nbsp;`);
+    md.appendMarkdown(`<span style="font-size: 12px; color: #e2e8f0; font-weight: 500;">${status.tier}</span>`);
+    md.appendMarkdown(`</div>`);
+    md.appendMarkdown(`<div style="font-size: 11px; color: #9ca3af;">${status.email}</div>`);
+    md.appendMarkdown(`</td>`);
+    
+    md.appendMarkdown(`<td align="right" style="vertical-align: middle; text-align: right;">`);
+    md.appendMarkdown(`<div style="background: rgba(204, 255, 0, 0.08); border-radius: 50%; padding: 4px; display: inline-block;">`);
+    md.appendMarkdown(`<img src="${accountIconSvg}" width="28" height="28" style="display: block;" />`);
+    md.appendMarkdown(`</div>`);
+    md.appendMarkdown(`</td>`);
+    
+    md.appendMarkdown(`</tr></table>`);
+    
+    md.appendMarkdown(`</td>`);
+    md.appendMarkdown(`</tr>`);
+    md.appendMarkdown(`</table>`);
     md.appendMarkdown(`</div>`);
 
     // Model Dashboard
@@ -211,7 +206,7 @@ export class StatusBarManager {
 
     // Interactive Footer - Using explicit standard Markdown syntax so the hovers stay "sticky"
     md.appendMarkdown(`\n\n---\n\n`); // Force a markdown line break out of the HTML block
-    md.appendMarkdown(`[$(sync) Refresh Quota](command:zeroquota.refresh) &nbsp;&nbsp;|&nbsp;&nbsp; [$(circuit-board) Brain](command:zeroquota.openBrain) &nbsp;&nbsp;|&nbsp;&nbsp; [$(json) MCP Config](command:zeroquota.openMcpConfig)\n`);
+    md.appendMarkdown(`[$(sync) Refresh Quota](command:zeroquota.refresh)\n`);
 
     // Ensure tooltip is fully trusted to allow command execution
     md.isTrusted = true;
@@ -220,13 +215,11 @@ export class StatusBarManager {
   }
 
   private getAppLogo(): string {
-    const iconPath = path.join(this.context.extensionPath, "icons", "ZeroQuota.svg");
+    const iconPath = path.join(this.context.extensionPath, "icons", "ZeroQuota Logo Primary Color.svg");
     try {
       if (fs.existsSync(iconPath)) {
         const content = fs.readFileSync(iconPath, "utf8");
-        // Ensure the logo path is filled specifically with a prominent color if it isn't set
-        const coloredContent = content.replace(/<path /g, '<path fill="#34d399" ');
-        const b64 = Buffer.from(coloredContent).toString("base64");
+        const b64 = Buffer.from(content).toString("base64");
         return `data:image/svg+xml;base64,${b64}`;
       }
     } catch(e) {}
@@ -310,6 +303,18 @@ export class StatusBarManager {
     } catch {
       return "N/A";
     }
+  }
+
+  private generateAccountCircle(): string {
+    const svg = `
+    <svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="24" cy="24" r="24" fill="rgba(204, 255, 0, 0.08)" />
+      <g transform="translate(12, 12)" fill="#ccff00">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
+      </g>
+    </svg>`.trim();
+    const b64 = Buffer.from(svg).toString("base64");
+    return `data:image/svg+xml;base64,${b64}`;
   }
 
   dispose() {

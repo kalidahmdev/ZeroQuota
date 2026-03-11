@@ -46,10 +46,36 @@ export class Orchestrator {
     this.pollInterval = setInterval(() => this.refresh(), interval * 1000);
   }
 
+  private previousFractions: Record<string, number> = {};
+
   async refresh() {
     const status = await this.sidecar.fetchUserStatus();
+    if (!status) return;
 
-    // We pass false for autoAccept state since the feature is removed
+    const notifyOnReset = this.context.globalState.get<boolean>("zeroquota.notifyOnReset", false);
+
+    if (notifyOnReset) {
+      let resetDetected = false;
+      for (const config of status.modelConfigs) {
+        if (!config.quotaInfo) continue;
+        
+        const label = config.label;
+        const frac = config.quotaInfo.remainingFraction;
+        const prev = this.previousFractions[label];
+
+        // If it was used (prev < 1.0) and is now fully reset (frac === 1.0)
+        if (prev !== undefined && prev < 1.0 && frac === 1.0) {
+            resetDetected = true;
+        }
+        this.previousFractions[label] = frac;
+      }
+
+      if (resetDetected) {
+          vscode.window.showInformationMessage("Your ZeroQuota models have been fully reset! 🚀");
+      }
+    }
+
+    // Update UI components
     this.statusBar.update(status);
     this.dashboard.update(status);
   }

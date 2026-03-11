@@ -11,6 +11,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
   private _latestStatus: UserStatus | null = null;
   private _updateInterval?: NodeJS.Timeout;
   private _usageHistory: Record<string, number[]> = {};
+  private _settingsVisible: boolean = false;
 
   constructor(private readonly _context: vscode.ExtensionContext) {
     // Initialize usage history from global state
@@ -35,6 +36,9 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.onDidReceiveMessage((message) => {
       switch (message.command) {
+        case "openLocalSettings":
+          vscode.commands.executeCommand("workbench.action.openSettings", "zeroquota");
+          break;
         case "refresh":
           vscode.commands.executeCommand("zeroquota.refresh");
           break;
@@ -42,39 +46,59 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
           vscode.commands.executeCommand("zeroquota.openMcpConfig");
           break;
         case "reload":
-          vscode.commands.executeCommand("workbench.action.reloadWindow");
+          vscode.commands.executeCommand("zeroquota.reload");
           break;
         case "openFile":
-          vscode.commands.executeCommand(
-            "vscode.open",
-            vscode.Uri.file(message.path),
-          );
+          vscode.commands.executeCommand("vscode.open", vscode.Uri.file(message.path));
+          break;
+        case "persistSettingsState":
+          this._settingsVisible = message.visible;
           break;
         case "saveSettings":
-          const { settings } = message;
-          if (settings.threshold) {
+          (async () => {
+              // Save threshold to global state
+              if (message.settings.threshold !== undefined) {
+                 this._context.globalState.update(
+                  "zeroquota.notificationThreshold",
+                  message.settings.threshold,
+                );
+              }
+          
+          // Save notifyOnReset to global state
+          if (message.settings.notifyOnReset !== undefined) {
              this._context.globalState.update(
-               "zeroquota.notificationThreshold",
-               settings.threshold,
-             );
-          }
-          
-          const config = vscode.workspace.getConfiguration("zeroquota");
-          
-          if (settings.modelPicker) {
-              config.update("modelPicker", settings.modelPicker, vscode.ConfigurationTarget.Global);
-          }
-          if (settings.refreshRate) {
-              config.update("refreshRate", settings.refreshRate, vscode.ConfigurationTarget.Global);
-          }
-          if (settings.autoSyncBrain !== undefined) {
-              config.update("autoSyncBrain", settings.autoSyncBrain, vscode.ConfigurationTarget.Global);
-          }
-          if (settings.historyWindow) {
-              config.update("historyWindow", settings.historyWindow, vscode.ConfigurationTarget.Global);
+              "zeroquota.notifyOnReset",
+              message.settings.notifyOnReset,
+            );
           }
 
-          vscode.window.showInformationMessage("ZeroQuota settings saved.");
+          // Save the rest to workspace configuration
+          const config = vscode.workspace.getConfiguration("zeroquota");
+          
+          if (message.settings.modelPicker) {
+            await config.update(
+              "modelPicker",
+              message.settings.modelPicker,
+              vscode.ConfigurationTarget.Global,
+            );
+          }
+          if (message.settings.refreshRate) {
+            await config.update(
+              "refreshRate",
+              message.settings.refreshRate,
+              vscode.ConfigurationTarget.Global,
+            );
+          }
+          if (message.settings.autoSyncBrain !== undefined) {
+            await config.update(
+              "autoSyncBrain",
+              message.settings.autoSyncBrain,
+              vscode.ConfigurationTarget.Global,
+            );
+          }
+          
+          vscode.window.showInformationMessage("Settings saved successfully!");
+          })();
           break;
       }
     });
@@ -113,8 +137,8 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     const lastUpdate =
       this._context.globalState.get<number>("zeroquota.lastHistoryUpdate") || 0;
 
-    // Update every 30 mins as requested, or if never updated
-    if (now - lastUpdate < 30 * 60 * 1000 && lastUpdate !== 0) return;
+    // Update every 10 mins for better responsiveness, or if never updated
+    if (now - lastUpdate < 10 * 60 * 1000 && lastUpdate !== 0) return;
 
     status.modelConfigs.forEach((config) => {
       const label = config.label;
@@ -143,14 +167,16 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const brainHtml = await this._getBrainDirectoryHtml();
+    const { html: brainHtml, count: folderCount } = await this._getBrainDirectoryHtml();
     this._view.webview.html = this._getHtmlForWebview(
       this._latestStatus,
       brainHtml,
+      folderCount,
+      this._settingsVisible,
     );
   }
 
-  private async _getBrainDirectoryHtml(): Promise<string> {
+  private async _getBrainDirectoryHtml(): Promise<{ html: string; count: number }> {
     const brainPath = path.join(
       os.homedir(),
       ".gemini",
@@ -159,9 +185,10 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     );
 
     let html = "";
+    let folderCount = 0;
     try {
       if (!fs.existsSync(brainPath)) {
-        return `<div class="empty-state">Brain folder not found</div>`;
+        return { html: `<div class="empty-state">Brain folder not found</div>`, count: 0 };
       }
 
       const items = await fs.promises.readdir(brainPath, {
@@ -182,6 +209,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       const folders = itemsWithStats
         .filter((i) => i.item.isDirectory())
         .map((i) => i.item);
+      folderCount = folders.length;
       const files = itemsWithStats
         .filter((i) => i.item.isFile())
         .map((i) => i.item);
@@ -244,10 +272,10 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         html += `<div class="empty-state">Empty brain directory</div>`;
       }
     } catch (e) {
-      return `<div class="empty-state">Error reading brain directory</div>`;
+      return { html: `<div class="empty-state">Error reading brain directory</div>`, count: 0 };
     }
 
-    return html;
+    return { html, count: folderCount };
   }
 
   private _formatResetTime(resetTimeStr?: string): string {
@@ -272,6 +300,8 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
   private _getHtmlForWebview(
     status: UserStatus | null,
     brainHtml: string,
+    folderCount: number,
+    settingsVisible: boolean = false,
   ): string {
     const tier = status?.tier || "N/A";
     const email = status?.email || "Not Signed In";
@@ -298,7 +328,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
     for (const m of configs) {
       if (!m.quotaInfo) continue;
-      const frac = m.quotaInfo.remainingFraction;
+      const frac = m.quotaInfo.remainingFraction ?? 0;
       const pct = Math.round(frac * 100);
       const reset = this._formatResetTime(m.quotaInfo.resetTime);
 
@@ -343,13 +373,24 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
     // Helper for sparklines
     const getSparkline = (label: string) => {
-      const history = this._usageHistory[label] || [
-        0.1, 0.2, 0.15, 0.3, 0.25, 0.4, 0.35, 0.5, 0.45, 0.6,
-      ];
-      const points = history.map((val, i) => `${i * 4},${10 - val * 10}`);
+      const storedHistory = this._usageHistory[label] || [0];
+      
+      // If history is less than 10 points, pad the beginning with the first known value
+      // so it draws a flat line initially instead of a spike from 0
+      const paddingNeeded = 10 - storedHistory.length;
+      const firstVal = storedHistory.length > 0 ? storedHistory[0] : 0;
+      const history = paddingNeeded > 0 
+          ? [...Array(paddingNeeded).fill(firstVal), ...storedHistory] 
+          : storedHistory;
+
+      // 'val' is fraction used (0 to 1, where 1 means 100% used/0% remaining)
+      // We want high remaining quota (low 'val') to be visually HIGH (y=0) on the graph
+      // and low remaining quota (high 'val') to be visually LOW (y=10) on the graph.
+      const points = history.map((val, i) => `${i * 4},${val * 10}`);
+      const startY = history[0] * 10;
 
       return `<svg width="40" height="12" viewBox="0 0 40 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M0,10 ${points.join(" ")}" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.4"/>
+            <path d="M0,${startY} L${points.join(" L")}" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.4"/>
         </svg>`;
     };
 
@@ -549,9 +590,11 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         }
 
         .tree-container {
-            max-height: 300px;
+            flex: 1;
             overflow-y: auto;
             font-size: 12px;
+            padding-right: 2px;
+            min-height: 0;
         }
 
         .tree-item {
@@ -720,21 +763,88 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
         select {
             width: 100%;
-            background: var(--bg-card);
+            background: #1a1a1a;
             border: 1px solid var(--border-subtle);
             color: var(--text-main);
-            padding: 8px;
+            padding: 10px 12px;
             border-radius: var(--radius-md);
             outline: none;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            background-size: 16px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        select:focus {
+            border-color: var(--neon-green);
+            box-shadow: 0 0 0 2px rgba(204, 255, 0, 0.1);
+        }
+
+        select:hover {
+            border-color: var(--text-muted);
+        }
+
+        option {
+            background-color: #1a1a1a;
+            color: var(--text-main);
+            padding: 10px;
+        }
+
+        .custom-input-group {
+            display: none;
+            margin-top: 8px;
+            animation: slideDown 0.2s ease-out;
+            position: relative;
+        }
+
+        .custom-input-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #1a1a1a;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 2px 12px 2px 2px;
+            transition: border-color 0.2s;
+        }
+
+        .custom-input-wrapper:focus-within {
+            border-color: var(--neon-green);
+        }
+
+        .custom-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            padding: 8px 10px;
+            outline: none;
+            font-family: inherit;
+            font-size: 13px;
+        }
+
+        .custom-input-suffix {
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <div class="header-title">ZeroQuota: Dashboard</div>
+        <div class="header-title" style="display: flex; align-items: center; gap: 6px;">
+            <span style="color: var(--neon-green); font-size: 8px;">●</span> TELEMETRY ACTIVE
+        </div>
         <div class="header-actions">
             <span class="codicon codicon-settings-gear" onclick="toggleSettings()"></span>
-            <span class="codicon codicon-menu"></span>
         </div>
     </div>
 
@@ -747,15 +857,27 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         
         <div class="setting-group">
             <label class="setting-label">Quota Notification Threshold</label>
-            <select id="threshold-select" onchange="saveSettings()">
+            <select id="threshold-select" onchange="toggleCustomThreshold()">
                 <option value="0">None</option>
                 <option value="10">10% Remaining</option>
                 <option value="25">25% Remaining</option>
                 <option value="50">50% Remaining</option>
+                <option value="custom">Custom...</option>
             </select>
-            <p style="font-size: 10px; color: var(--text-muted); margin-top: 8px;">
+            <div id="custom-threshold-container" class="custom-input-group">
+                <div class="custom-input-wrapper">
+                    <input type="number" id="custom-threshold-input" class="custom-input" placeholder="e.g. 15" min="1" max="99" onchange="saveSettings()">
+                    <span class="custom-input-suffix">%</span>
+                </div>
+            </div>
+            <p style="font-size: 10px; color: var(--text-muted); margin-top: 8px; margin-bottom: 12px;">
                 You will receive a notification when your model quota drops below this level.
             </p>
+            
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-main);">
+                <input type="checkbox" id="notify-reset" onchange="saveSettings()"> 
+                Notify me when quotas are fully reset
+            </label>
         </div>
 
         <div class="setting-group">
@@ -792,22 +914,13 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
                 <input type="checkbox" id="autosync-checkbox" onchange="saveSettings()">
             </label>
         </div>
-
-        <div class="setting-group">
-            <label class="setting-label">History Window</label>
-            <select id="historywindow-select" onchange="saveSettings()">
-                <option value="5h">Last 5h</option>
-                <option value="12h">Last 12h</option>
-                <option value="24h">Last 24h</option>
-            </select>
-        </div>
         
         <div style="margin-top: auto; padding-bottom: 20px;">
             <button class="btn btn-primary" style="width: 100%;" onclick="toggleSettings()">Done</button>
         </div>
     </div>
 
-    <div class="scrollable" style="flex: 1; overflow-y: auto; padding-right: 4px;">
+    <div class="scrollable" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; padding-right: 4px;">
         <!-- Plan Info Card -->
         <div class="card" style="display: flex; align-items: center; gap: 16px; padding: 16px; margin-bottom: 20px;">
             <div style="width: 48px; height: 48px; border-radius: 50%; background: rgba(204, 255, 0, 0.08); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
@@ -830,8 +943,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
                     Model Usage
                 </div>
                 <div class="card-actions">
-                    <span class="codicon codicon-info" title="High/Low variants supported"></span>
-                    <span class="codicon codicon-chevron-right"></span>
+                    <span class="codicon codicon-info" title="Real-time telemetry and burn-rate tracking. History visualizes the last rolling 5 hour window."></span>
                 </div>
             </div>
 
@@ -913,13 +1025,13 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         </div>
 
         <!-- Brain Directory Card -->
-        <div class="card">
+        <div class="card" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; margin-bottom: 0;">
             <div class="card-header">
                 <div class="card-title">
                     <span class="codicon codicon-folder-active"></span>
                     Brain Directory
                 </div>
-                <span id="folder-count-badge" class="tree-count">0 Folders</span>
+                <span id="folder-count-badge" class="tree-count">${folderCount} Folders</span>
             </div>
 
             <div class="search-container">
@@ -964,11 +1076,6 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             icon.classList.toggle('codicon-folder-opened');
         }
 
-        function updateFolderCount() {
-            const visibleFolders = Array.from(document.querySelectorAll('.brain-folder')).filter(f => !f.classList.contains('hidden')).length;
-            document.getElementById('folder-count-badge').innerText = \`\${visibleFolders} Folders\`;
-        }
-
         function filterBrain() {
             const query = document.getElementById('brainSearch').value.toLowerCase();
             const folders = document.querySelectorAll('.brain-folder');
@@ -1011,28 +1118,57 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
                     file.classList.add('hidden');
                 }
             });
+        }
 
-            updateFolderCount();
+        let isSettingsVisible = ${settingsVisible ? "true" : "false"};
+        
+        // Apply initial state
+        if (isSettingsVisible) {
+            document.getElementById('settings-overlay').classList.add('visible');
         }
 
         function toggleSettings() {
-            document.getElementById('settings-overlay').classList.toggle('visible');
+            const overlay = document.getElementById('settings-overlay');
+            isSettingsVisible = !isSettingsVisible;
+            if (isSettingsVisible) {
+                overlay.classList.add('visible');
+            } else {
+                overlay.classList.remove('visible');
+            }
+            // Notify the back-end about state change so it can persist it
+            vscode.postMessage({ command: 'persistSettingsState', visible: isSettingsVisible });
+        }
+
+        function toggleCustomThreshold() {
+            const select = document.getElementById('threshold-select');
+            const customContainer = document.getElementById('custom-threshold-container');
+            if (select.value === 'custom') {
+                customContainer.style.display = 'block';
+            } else {
+                customContainer.style.display = 'none';
+                saveSettings();
+            }
         }
 
         function saveSettings() {
-            const threshold = document.getElementById('threshold-select').value;
+            let threshold = document.getElementById('threshold-select').value;
+            if (threshold === 'custom') {
+                threshold = document.getElementById('custom-threshold-input').value;
+            }
+            const notifyOnReset = document.getElementById('notify-reset').checked;
+            
             const modelGeminiPro = document.getElementById('model-geminipro').checked;
             const modelGeminiFlash = document.getElementById('model-geminiflash').checked;
             const modelClaude = document.getElementById('model-claude').checked;
             const modelGptOss = document.getElementById('model-gptoss').checked;
             const refreshRate = document.getElementById('refreshrate-select').value;
             const autoSync = document.getElementById('autosync-checkbox').checked;
-            const historyWindow = document.getElementById('historywindow-select').value;
 
             vscode.postMessage({ 
                 command: 'saveSettings', 
                 settings: {
                     threshold,
+                    notifyOnReset,
                     modelPicker: {
                         geminiPro: modelGeminiPro,
                         geminiFlash: modelGeminiFlash,
@@ -1040,15 +1176,26 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
                         gptOss: modelGptOss
                     },
                     refreshRate,
-                    autoSyncBrain: autoSync,
-                    historyWindow
+                    autoSyncBrain: autoSync
                 }
             });
         }
 
         // Load initial settings
         const initialThreshold = "${this._context.globalState.get("zeroquota.notificationThreshold", "25")}";
-        document.getElementById('threshold-select').value = initialThreshold;
+        const thresholdSelect = document.getElementById('threshold-select');
+        const customInput = document.getElementById('custom-threshold-input');
+        
+        if (['0', '10', '25', '50'].includes(initialThreshold)) {
+            thresholdSelect.value = initialThreshold;
+        } else {
+            thresholdSelect.value = 'custom';
+            document.getElementById('custom-threshold-container').style.display = 'block';
+            customInput.value = initialThreshold;
+        }
+        
+        const initialNotifyReset = ${this._context.globalState.get("zeroquota.notifyOnReset", false) ? "true" : "false"};
+        document.getElementById('notify-reset').checked = initialNotifyReset;
 
         // Note: The rest of the settings are Workspace Configurations, not Global State
         const config = ${JSON.stringify(vscode.workspace.getConfiguration("zeroquota"))};
@@ -1060,10 +1207,6 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         
         document.getElementById('refreshrate-select').value = config.refreshRate || "1m";
         document.getElementById('autosync-checkbox').checked = config.autoSyncBrain ?? true;
-        document.getElementById('historywindow-select').value = config.historyWindow || "12h";
-
-        // Initial count
-        updateFolderCount();
     </script>
 </body>
 </html>`;

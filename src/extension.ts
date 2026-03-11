@@ -27,6 +27,9 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("zeroquota.statusBarAction", async () => {
       await vscode.commands.executeCommand("zeroquota.refresh");
       await vscode.commands.executeCommand("zeroquota.dashboard.focus");
+    }),
+    vscode.commands.registerCommand("zeroquota.reload", () => {
+      vscode.commands.executeCommand("workbench.action.reloadWindow");
     })
   );
 
