@@ -4,11 +4,14 @@
   "icon": "icons/store-logo.png",
   "description": "Premium AI quota monitoring and hands-free terminal automation for Antigravity IDE.",
   "version": "1.0.0",
-  "publisher": "antigravity",
+  "publisher": "ZeroQuota",
+  "author": "kalidahmdev",
+  "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
-    "url": "https://github.com/antigravity/zeroquota"
+    "url": "https://github.com/kalidahmdev/ZeroQuota"
   },
+
   "engines": {
     "vscode": "^1.90.0"
   },
