@@ -15,7 +15,7 @@ import { execSync } from 'child_process';
  * 6. Git push commit and tag
  */
 
-const projectRoot = path.join(__dirname, '..');
+const projectRoot = path.join(__dirname, '..', '..');
 const packageJsonPath = path.join(projectRoot, 'package.json');
 const packageLockPath = path.join(projectRoot, 'package-lock.json');
 
