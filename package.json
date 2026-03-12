@@ -3,7 +3,7 @@
   "displayName": "ZeroQuota",
   "icon": "assets/icons/store-logo.png",
   "description": "A premium, high-performance AI quota monitoring and automation suite for the Antigravity IDE, featuring real-time telemetry and advanced model management.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "ZeroQuota",
   "author": "kalidahmdev",
   "license": "MIT",
