@@ -1,3 +1,9 @@
+/**
+ * ZeroQuota - Antigravity IDE Extension
+ * Copyright (c) 2026 kalidahmdev
+ * Licensed under the MIT License
+ */
+
 import { exec } from "child_process";
 import { promisify } from "util";
 import axios from "axios";

@@ -1,3 +1,9 @@
+/**
+ * ZeroQuota - Antigravity IDE Extension
+ * Copyright (c) 2026 kalidahmdev
+ * Licensed under the MIT License
+ */
+
 import * as vscode from "vscode";
 import * as os from "os";
 import * as path from "path";

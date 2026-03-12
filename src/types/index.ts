@@ -1,3 +1,9 @@
+/**
+ * ZeroQuota - Antigravity IDE Extension
+ * Copyright (c) 2026 kalidahmdev
+ * Licensed under the MIT License
+ */
+
 export interface QuotaInfo {
   remainingFraction: number;
   resetTime?: string;

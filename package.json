@@ -11,6 +11,10 @@
     "type": "git",
     "url": "https://github.com/kalidahmdev/ZeroQuota"
   },
+  "bugs": {
+    "url": "https://github.com/kalidahmdev/ZeroQuota/issues"
+  },
+  "homepage": "https://github.com/kalidahmdev/ZeroQuota#readme",
 
   "engines": {
     "vscode": "^1.90.0"
