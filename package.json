@@ -2,7 +2,7 @@
   "name": "zeroquota",
   "displayName": "ZeroQuota",
   "icon": "assets/icons/store-logo.png",
-  "description": "Premium AI quota monitoring and hands-free terminal automation for Antigravity IDE.",
+  "description": "A premium, high-performance AI quota monitoring and automation suite for the Antigravity IDE, featuring real-time telemetry and advanced model management.",
   "version": "1.0.0",
   "publisher": "ZeroQuota",
   "author": "kalidahmdev",
@@ -49,7 +49,7 @@
         {
           "id": "zeroquota-sidebar",
           "title": "ZeroQuota",
-          "icon": "assets/ZeroQuota.svg"
+          "icon": "assets/icons/ZeroQuota.svg"
         }
       ]
     },
@@ -59,7 +59,7 @@
           "type": "webview",
           "id": "zeroquota.dashboard",
           "name": "Dashboard",
-          "icon": "assets/ZeroQuota.svg"
+          "icon": "assets/icons/ZeroQuota.svg"
         }
       ]
     },
@@ -117,6 +117,7 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "package": "node esbuild.js --production",
+    "release": "ts-node src/scripts/release.ts",
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {

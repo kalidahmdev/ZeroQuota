@@ -846,8 +846,11 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
     <div class="header">
-        <div class="header-title" style="display: flex; align-items: center; gap: 6px;">
-            <span style="color: var(--neon-green); font-size: 8px;">●</span> TELEMETRY ACTIVE
+        <div class="header-title" style="display: flex; align-items: center; gap: 8px;">
+            <img src="${this._view?.webview.asWebviewUri(vscode.Uri.joinPath(this._context.extensionUri, "assets", "icons", "ZeroQuota.svg"))}" width="16" height="16" style="filter: drop-shadow(0 0 5px var(--neon-green)44);">
+            <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="color: var(--neon-green); font-size: 8px;">●</span> TELEMETRY ACTIVE
+            </div>
         </div>
         <div class="header-actions">
             <span class="codicon codicon-settings-gear" onclick="toggleSettings()"></span>
