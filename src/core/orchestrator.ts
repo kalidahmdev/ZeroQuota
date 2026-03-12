@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
-import { SidecarService } from "./services/sidecarService";
-import { StatusBarManager } from "./ui/statusBarManager";
-import { DashboardViewProvider } from "./ui/dashboardViewProvider";
+import { SidecarService } from "../services/sidecarService";
+import { StatusBarManager } from "../ui/statusBarManager";
+import { DashboardViewProvider } from "../ui/dashboardViewProvider";
 
 
 

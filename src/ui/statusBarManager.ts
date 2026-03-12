@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { UserStatus } from "../services/sidecarService";
+import { UserStatus } from "../types";
 
 export class StatusBarManager {
   private statusBarItem: vscode.StatusBarItem;
@@ -215,7 +215,7 @@ export class StatusBarManager {
   }
 
   private getAppLogo(): string {
-    const iconPath = path.join(this.context.extensionPath, "icons", "ZeroQuota Logo Primary Color.svg");
+    const iconPath = path.join(this.context.extensionPath, "assets", "icons", "ZeroQuota Logo Primary Color.svg");
     try {
       if (fs.existsSync(iconPath)) {
         const content = fs.readFileSync(iconPath, "utf8");
@@ -238,7 +238,7 @@ export class StatusBarManager {
     if (!filename) return "";
 
     try {
-      const iconPath = path.join(this.context.extensionPath, "icons", filename);
+      const iconPath = path.join(this.context.extensionPath, "assets", "brands", filename);
       if (fs.existsSync(iconPath)) {
         const content = fs.readFileSync(iconPath, "utf8");
         // For brand icons, let's use a cleaner white/light-grey for better contrast
