@@ -1,13 +1,13 @@
 import * as vscode from "vscode";
 import * as os from "os";
 import * as path from "path";
-import { Orchestrator } from "./orchestrator";
+import { Orchestrator } from "./core/orchestrator";
 
 
 let orchestrator: Orchestrator;
 
 export async function activate(context: vscode.ExtensionContext) {
-  console.log("[ZeroQuota] Extension activated");
+  console.log("[ZeroQuota] Extension activated in Antigravity IDE");
 
   orchestrator = new Orchestrator(context);
   await orchestrator.init();

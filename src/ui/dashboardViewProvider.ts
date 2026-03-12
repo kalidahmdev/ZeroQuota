@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
-import { UserStatus } from "../services/sidecarService";
+import { UserStatus } from "../types";
 
 export class DashboardViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "zeroquota.dashboard";
@@ -361,7 +361,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
     const getIconUri = (name: string) => {
       return this._view?.webview.asWebviewUri(
-        vscode.Uri.joinPath(this._context.extensionUri, "icons", `${name}.svg`),
+        vscode.Uri.joinPath(this._context.extensionUri, "assets", "brands", `${name}.svg`),
       );
     };
 
