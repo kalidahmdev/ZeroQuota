@@ -9,6 +9,7 @@ import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import { UserStatus } from "../types";
+import { getQuotaColor } from "./utils";
 
 export class DashboardViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "zeroquota.dashboard";
@@ -372,9 +373,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     };
 
     const getColor = (frac: number) => {
-      if (frac > 0.4) return "#ccff00"; // Premium Neon Green
-      if (frac > 0.2) return "#fbbf24"; // Warning Yellow
-      return "#f87171"; // Error Red
+      return getQuotaColor(frac);
     };
 
     // Helper for sparklines
