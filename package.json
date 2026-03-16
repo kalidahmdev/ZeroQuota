@@ -3,7 +3,7 @@
   "displayName": "ZeroQuota",
   "icon": "assets/icons/store-logo.png",
   "description": "A premium, high-performance AI quota monitoring and automation suite for the Antigravity IDE, featuring real-time telemetry and advanced model management.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "publisher": "ZeroQuota",
   "author": "kalidahmdev",
   "license": "MIT",
@@ -47,7 +47,7 @@
       "activitybar": [
         {
           "id": "zeroquota-sidebar",
-          "title": "ZeroQuota",
+          "title": "Overview",
           "icon": "assets/icons/ZeroQuota.svg"
         }
       ]
@@ -57,7 +57,7 @@
         {
           "type": "webview",
           "id": "zeroquota.dashboard",
-          "name": "Dashboard",
+          "name": "Overview",
           "icon": "assets/icons/ZeroQuota.svg"
         }
       ]
@@ -117,20 +117,30 @@
     "lint": "eslint src --ext ts",
     "package": "node esbuild.js --production",
     "release": "npx ts-node src/scripts/release.ts",
-    "test": "node ./out/test/runTest.js"
+    "test": "vitest run",
+    "test:full": "npm run pretest && vitest run"
   },
   "devDependencies": {
+    "@types/chai": "^4.3.20",
+    "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
+    "@types/sinon": "^17.0.4",
     "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^7.14.1",
     "@typescript-eslint/parser": "^7.14.1",
+    "@vitest/coverage-v8": "^4.1.0",
     "@vscode/test-electron": "^2.4.0",
     "@vscode/vsce": "^3.7.1",
+    "axios-mock-adapter": "^2.1.0",
+    "c8": "^9.1.0",
+    "chai": "^4.5.0",
     "esbuild": "^0.27.3",
     "eslint": "^8.57.0",
     "fantasticon": "^4.1.0",
+    "sinon": "^17.0.1",
     "ts-node": "^10.9.2",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vitest": "^4.1.0"
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.44",
