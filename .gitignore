@@ -53,3 +53,15 @@ coverage/
 
 # Agent
 .agent/
+
+# Claude
+claude.md
+claude/
+memory/
+.claude/
+
+# VSCode Test
+.vscode-test/
+
+# Docs
+docs/

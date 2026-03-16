@@ -23,3 +23,10 @@ export interface UserStatus {
   flowCredits: number;
   availableFlowCredits: number;
 }
+
+export interface ModelPickerConfig {
+  geminiPro?: boolean;
+  geminiFlash?: boolean;
+  claude?: boolean;
+  gptOss?: boolean;
+}

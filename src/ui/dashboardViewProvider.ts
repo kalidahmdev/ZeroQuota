@@ -8,7 +8,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
-import { UserStatus } from "../types";
+import { UserStatus, ModelPickerConfig } from "../types";
 import { getQuotaColor } from "./utils";
 
 export class DashboardViewProvider implements vscode.WebviewViewProvider {
@@ -19,17 +19,25 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
   private _updateInterval?: NodeJS.Timeout;
   private _usageHistory: Record<string, number[]> = {};
   private _settingsVisible: boolean = false;
+  private _lastSeenStatus: Record<string, { remaining: number; resetTime?: string }> = {};
 
   constructor(private readonly _context: vscode.ExtensionContext) {
-    // Initialize usage history from global state
+    // Initialize usage history and last status from global state
     this._usageHistory =
       this._context.globalState.get("zeroquota.usageHistory") || {};
+    this._lastSeenStatus =
+      this._context.globalState.get("zeroquota.lastSeenStatus") || {};
+    this._context.subscriptions.push(
+      vscode.window.onDidChangeActiveColorTheme(() => {
+        this._updateHtml();
+      }),
+    );
   }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
-    _context: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken,
+    _context: vscode.WebviewViewResolveContext, // eslint-disable-line @typescript-eslint/no-unused-vars
+    _token: vscode.CancellationToken, // eslint-disable-line @typescript-eslint/no-unused-vars
   ) {
     this._view = webviewView;
 
@@ -44,7 +52,10 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.onDidReceiveMessage((message) => {
       switch (message.command) {
         case "openLocalSettings":
-          vscode.commands.executeCommand("workbench.action.openSettings", "zeroquota");
+          vscode.commands.executeCommand(
+            "workbench.action.openSettings",
+            "zeroquota",
+          );
           break;
         case "refresh":
           vscode.commands.executeCommand("zeroquota.refresh");
@@ -56,55 +67,60 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
           vscode.commands.executeCommand("zeroquota.reload");
           break;
         case "openFile":
-          vscode.commands.executeCommand("vscode.open", vscode.Uri.file(message.path));
+          vscode.commands.executeCommand(
+            "vscode.open",
+            vscode.Uri.file(message.path),
+          );
           break;
         case "persistSettingsState":
           this._settingsVisible = message.visible;
           break;
         case "saveSettings":
           (async () => {
-              // Save threshold to global state
-              if (message.settings.threshold !== undefined) {
-                 this._context.globalState.update(
-                  "zeroquota.notificationThreshold",
-                  message.settings.threshold,
-                );
-              }
-          
-          // Save notifyOnReset to global state
-          if (message.settings.notifyOnReset !== undefined) {
-             this._context.globalState.update(
-              "zeroquota.notifyOnReset",
-              message.settings.notifyOnReset,
-            );
-          }
+            // Save threshold to global state
+            if (message.settings.threshold !== undefined) {
+              this._context.globalState.update(
+                "zeroquota.notificationThreshold",
+                message.settings.threshold,
+              );
+            }
 
-          // Save the rest to workspace configuration
-          const config = vscode.workspace.getConfiguration("zeroquota");
-          
-          if (message.settings.modelPicker) {
-            await config.update(
-              "modelPicker",
-              message.settings.modelPicker,
-              vscode.ConfigurationTarget.Global,
+            // Save notifyOnReset to global state
+            if (message.settings.notifyOnReset !== undefined) {
+              this._context.globalState.update(
+                "zeroquota.notifyOnReset",
+                message.settings.notifyOnReset,
+              );
+            }
+
+            // Save the rest to workspace configuration
+            const config = vscode.workspace.getConfiguration("zeroquota");
+
+            if (message.settings.modelPicker) {
+              await config.update(
+                "modelPicker",
+                message.settings.modelPicker,
+                vscode.ConfigurationTarget.Global,
+              );
+            }
+            if (message.settings.refreshRate) {
+              await config.update(
+                "refreshRate",
+                message.settings.refreshRate,
+                vscode.ConfigurationTarget.Global,
+              );
+            }
+            if (message.settings.autoSyncBrain !== undefined) {
+              await config.update(
+                "autoSyncBrain",
+                message.settings.autoSyncBrain,
+                vscode.ConfigurationTarget.Global,
+              );
+            }
+
+            vscode.window.showInformationMessage(
+              "Settings saved successfully!",
             );
-          }
-          if (message.settings.refreshRate) {
-            await config.update(
-              "refreshRate",
-              message.settings.refreshRate,
-              vscode.ConfigurationTarget.Global,
-            );
-          }
-          if (message.settings.autoSyncBrain !== undefined) {
-            await config.update(
-              "autoSyncBrain",
-              message.settings.autoSyncBrain,
-              vscode.ConfigurationTarget.Global,
-            );
-          }
-          
-          vscode.window.showInformationMessage("Settings saved successfully!");
           })();
           break;
       }
@@ -144,27 +160,65 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     const lastUpdate =
       this._context.globalState.get<number>("zeroquota.lastHistoryUpdate") || 0;
 
-    // Update every 10 mins for better responsiveness, or if never updated
-    if (now - lastUpdate < 10 * 60 * 1000 && lastUpdate !== 0) return;
+    // Update every 1 minute to show more activity in the spikes
+    if (now - lastUpdate < 1 * 60 * 1000 && lastUpdate !== 0) return;
 
     status.modelConfigs.forEach((config) => {
-      const label = config.label;
-      const frac = config.quotaInfo?.remainingFraction ?? 1;
-      const used = 1 - frac;
+      let key = config.label;
+      // Map keys to match the ones used in _getHtmlForWebview mapping
+      if (key.includes("Gemini") && key.includes("Pro")) key = "Gemini Pro";
+      else if (key.includes("Gemini") && key.includes("Flash")) key = "Gemini Flash";
+      else if (key.includes("Claude")) key = "Claude Opus 4.6";
+      else if (key.toLowerCase().includes("gpt")) key = "GPT OSS";
 
-      if (!this._usageHistory[label]) {
-        this._usageHistory[label] = [];
+      const currentRemaining = config.quotaInfo?.remainingFraction ?? 1;
+      const currentResetTime = config.quotaInfo?.resetTime;
+      const lastStatus = this._lastSeenStatus[key];
+
+      // Detect Reset:
+      // 1. If we have a last status and the current remaining is GREATER than last seen and high (>= 0.99)
+      // 2. OR if resetTime has changed to a later string
+      const isReset = lastStatus && (
+        (currentRemaining > lastStatus.remaining && currentRemaining > 0.99) ||
+        (currentResetTime && lastStatus.resetTime && currentResetTime !== lastStatus.resetTime)
+      );
+
+      if (isReset) {
+        this._usageHistory[key] = [];
       }
 
-      this._usageHistory[label].push(used);
-      if (this._usageHistory[label].length > 10) {
-        this._usageHistory[label].shift();
+      if (!this._usageHistory[key]) {
+        this._usageHistory[key] = [];
       }
+
+      // Delta calculation: How much was used since last check?
+      // If it's the first time or a reset, delta is 0 relative to "start"
+      let delta = 0;
+      if (lastStatus && !isReset) {
+        delta = Math.max(0, lastStatus.remaining - currentRemaining);
+      }
+
+      // Only push if there's usage OR if we want to show a 0 usage point
+      this._usageHistory[key].push(delta);
+      
+      if (this._usageHistory[key].length > 20) {
+        this._usageHistory[key].shift();
+      }
+
+      // Update tracker
+      this._lastSeenStatus[key] = {
+        remaining: currentRemaining,
+        resetTime: currentResetTime
+      };
     });
 
     this._context.globalState.update(
       "zeroquota.usageHistory",
       this._usageHistory,
+    );
+    this._context.globalState.update(
+      "zeroquota.lastSeenStatus",
+      this._lastSeenStatus,
     );
     this._context.globalState.update("zeroquota.lastHistoryUpdate", now);
   }
@@ -174,7 +228,8 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const { html: brainHtml, count: folderCount } = await this._getBrainDirectoryHtml();
+    const { html: brainHtml, count: folderCount } =
+      await this._getBrainDirectoryHtml();
     this._view.webview.html = this._getHtmlForWebview(
       this._latestStatus,
       brainHtml,
@@ -183,7 +238,10 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     );
   }
 
-  private async _getBrainDirectoryHtml(): Promise<{ html: string; count: number }> {
+  private async _getBrainDirectoryHtml(): Promise<{
+    html: string;
+    count: number;
+  }> {
     const brainPath = path.join(
       os.homedir(),
       ".gemini",
@@ -195,7 +253,10 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     let folderCount = 0;
     try {
       if (!fs.existsSync(brainPath)) {
-        return { html: `<div class="empty-state">Brain folder not found</div>`, count: 0 };
+        return {
+          html: `<div class="empty-state">Brain folder not found</div>`,
+          count: 0,
+        };
       }
 
       const items = await fs.promises.readdir(brainPath, {
@@ -244,8 +305,11 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             const ext = path.extname(file.name).toLowerCase();
             let iconClass = "codicon-file";
             if (ext === ".md") iconClass = "codicon-markdown";
-            else if ([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"].includes(ext)) iconClass = "codicon-file-media";
-            
+            else if (
+              [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"].includes(ext)
+            )
+              iconClass = "codicon-file-media";
+
             html += `<div class="tree-item brain-file" onclick="openFile('${filePath.replace(/\\/g, "\\\\")}')">
                         <span class="codicon ${iconClass}"></span>
                         <span>${file.name}</span>
@@ -267,7 +331,10 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         const ext = path.extname(file.name).toLowerCase();
         let iconClass = "codicon-file";
         if (ext === ".md") iconClass = "codicon-markdown";
-        else if ([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"].includes(ext)) iconClass = "codicon-file-media";
+        else if (
+          [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"].includes(ext)
+        )
+          iconClass = "codicon-file-media";
 
         html += `<div class="tree-item brain-file standalone" onclick="openFile('${filePath.replace(/\\/g, "\\\\")}')">
                 <span class="codicon ${iconClass}"></span>
@@ -279,7 +346,10 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         html += `<div class="empty-state">Empty brain directory</div>`;
       }
     } catch (e) {
-      return { html: `<div class="empty-state">Error reading brain directory</div>`, count: 0 };
+      return {
+        html: `<div class="empty-state">Error reading brain directory</div>`,
+        count: 0,
+      };
     }
 
     return { html, count: folderCount };
@@ -304,6 +374,37 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private _getThemePalette() {
+    const isLight =
+      vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light;
+    // Brand neon green #ccff00. In light mode, we use black for contrast if requested.
+    const neonGreen = isLight ? "#000000" : "#ccff00";
+
+    return {
+      bgDeep: "var(--vscode-panel-background)",
+      bgCard: "var(--vscode-editorWidget-background)",
+      borderSubtle: "var(--vscode-editorWidget-border)",
+      progressTrack: isLight
+        ? "rgba(0, 0, 0, 0.08)"
+        : "rgba(255, 255, 255, 0.12)",
+      inputBg: "var(--vscode-input-background)",
+      itemHover: "var(--vscode-list-hoverBackground)",
+      buttonHover: "var(--vscode-button-hoverBackground)",
+      neonGreen: neonGreen,
+      neonContrast: isLight ? "#ffffff" : "#000000",
+      neonFaint: isLight ? "rgba(0, 0, 0, 0.05)" : "rgba(204, 255, 0, 0.08)",
+      neonBadge: isLight ? "rgba(0, 0, 0, 0.1)" : "rgba(204, 255, 0, 0.18)",
+      neonBorder: isLight ? "rgba(0, 0, 0, 0.2)" : "rgba(204, 255, 0, 0.3)",
+      neonGlow: isLight ? "rgba(0, 0, 0, 0.08)" : "rgba(204, 255, 0, 0.12)",
+      overlayBg: isLight
+        ? "rgba(255, 255, 255, 0.95)"
+        : "rgba(10, 10, 10, 0.95)",
+      glowStrength: isLight ? "0px" : "10px",
+      textMain: "var(--vscode-editor-foreground)",
+      textMuted: "var(--vscode-descriptionForeground)",
+    };
+  }
+
   private _getHtmlForWebview(
     status: UserStatus | null,
     brainHtml: string,
@@ -314,6 +415,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     const email = status?.email || "Not Signed In";
 
     const configs = status?.modelConfigs || [];
+    const palette = this._getThemePalette();
 
     // Exact mapping logic for the top 3 models
     let proPct = 0,
@@ -335,7 +437,8 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
     for (const m of configs) {
       if (!m.quotaInfo) continue;
-      const frac = m.quotaInfo.remainingFraction ?? 0;
+      const bFrac = m.quotaInfo.remainingFraction ?? 0;
+      const frac = isNaN(bFrac) ? 0 : bFrac;
       const pct = Math.round(frac * 100);
       const reset = this._formatResetTime(m.quotaInfo.resetTime);
 
@@ -353,10 +456,10 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         // If it's Claude, we enforce the explicitly requested name "Claude Opus 4.6"
         // and we only capture the first one we find so Opus/Sonnet don't overwrite each other.
         if (claudePct === 0 || m.label.includes("Opus")) {
-            claudePct = pct;
-            claudeFrac = frac;
-            claudeReset = reset;
-            claudeLabel = "Claude Opus 4.6";
+          claudePct = pct;
+          claudeFrac = frac;
+          claudeReset = reset;
+          claudeLabel = "Claude Opus 4.6";
         }
       } else if (m.label.toLowerCase().includes("gpt")) {
         gptPct = pct;
@@ -367,56 +470,150 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     }
 
     const getIconUri = (name: string) => {
+      const isLight =
+        vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light;
+      const iconColor = isLight ? "#444444" : "#d1d5db";
+      const iconPath = path.join(
+        this._context.extensionPath,
+        "assets",
+        "brands",
+        `${name}.svg`,
+      );
+      try {
+        if (fs.existsSync(iconPath)) {
+          const content = fs.readFileSync(iconPath, "utf8");
+          const coloredContent = content.replace(
+            /fill="#[^"]*"/g,
+            `fill="${iconColor}"`,
+          );
+          const b64 = Buffer.from(coloredContent).toString("base64");
+          return `data:image/svg+xml;base64,${b64}`;
+        }
+      } catch (e) {
+        console.error("[ZeroQuota] Icon loading error:", e);
+      }
       return this._view?.webview.asWebviewUri(
-        vscode.Uri.joinPath(this._context.extensionUri, "assets", "brands", `${name}.svg`),
+        vscode.Uri.joinPath(
+          this._context.extensionUri,
+          "assets",
+          "brands",
+          `${name}.svg`,
+        ),
       );
     };
 
+    const getBrandLogo = () => {
+      const isLight =
+        vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light;
+      const logoColor = isLight ? "#000000" : "#ccff00";
+      const logoPath = path.join(
+        this._context.extensionPath,
+        "assets",
+        "icons",
+        "ZeroQuota.svg",
+      );
+      try {
+        if (fs.existsSync(logoPath)) {
+          const content = fs.readFileSync(logoPath, "utf8");
+          // Replace existing fill attributes and add fill to paths without them
+          const coloredContent = content
+            .replace(/fill="#[^"]*"/g, `fill="${logoColor}"`)
+            .replace(/<path(?![^>]*fill=)/g, `<path fill="${logoColor}"`);
+          const b64 = Buffer.from(coloredContent).toString("base64");
+          return `data:image/svg+xml;base64,${b64}`;
+        }
+      } catch (e) {
+        console.error("[ZeroQuota] Logo loading error:", e);
+      }
+      return "";
+    };
+
     const getColor = (frac: number) => {
-      return getQuotaColor(frac);
+      const color = getQuotaColor(frac);
+      const isLight =
+        vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light;
+      if (isLight && color === "#ccff00") {
+        return "#000000";
+      }
+      return color;
     };
 
     // Helper for sparklines
-    const getSparkline = (label: string) => {
+    const getSparkline = (label: string, color: string) => {
       const storedHistory = this._usageHistory[label] || [0];
-      
-      // If history is less than 10 points, pad the beginning with the first known value
-      // so it draws a flat line initially instead of a spike from 0
       const paddingNeeded = 10 - storedHistory.length;
       const firstVal = storedHistory.length > 0 ? storedHistory[0] : 0;
-      const history = paddingNeeded > 0 
-          ? [...Array(paddingNeeded).fill(firstVal), ...storedHistory] 
+      const history =
+        paddingNeeded > 0
+          ? [...Array(paddingNeeded).fill(firstVal), ...storedHistory]
           : storedHistory;
 
-      // 'val' is fraction used (0 to 1, where 1 means 100% used/0% remaining)
-      // We want high remaining quota (low 'val') to be visually HIGH (y=0) on the graph
-      // and low remaining quota (high 'val') to be visually LOW (y=10) on the graph.
-      const points = history.map((val, i) => `${i * 4},${val * 10}`);
-      const startY = history[0] * 10;
+      // Map values to coordinates
+      // Since these are deltas, we scale them relative to the max delta in the current history.
+      const maxDelta = Math.max(0.05, ...history); // Minimum scale of 5% for visibility
+      const pts = history.map((val, i) => ({
+        x: i * (40 / (history.length - 1 || 1)), 
+        y: 11 - (val / maxDelta) * 10, // Scale relative to max usage spike
+      }));
 
-      return `<svg width="40" height="12" viewBox="0 0 40 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M0,${startY} L${points.join(" L")}" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.4"/>
+      // Generate smooth path using simple cubic Bezier interpolation
+      let pathD = `M ${pts[0].x},${pts[0].y}`;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[i];
+        const p1 = pts[i + 1];
+        const cpX = (p0.x + p1.x) / 2;
+        pathD += ` C ${cpX},${p0.y} ${cpX},${p1.y} ${p1.x},${p1.y}`;
+      }
+
+      const lastPt = pts[pts.length - 1];
+      const isLight =
+        vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light;
+      const strokeColor = color;
+      const id = label.replace(/\s+/g, '-').toLowerCase();
+
+      return `<svg width="40" height="12" viewBox="0 0 40 12" fill="none" xmlns="http://www.w3.org/2000/svg" style="overflow: visible;">
+            <defs>
+                <linearGradient id="grad-${id}" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stop-color="${strokeColor}" stop-opacity="0.3" />
+                    <stop offset="100%" stop-color="${strokeColor}" stop-opacity="0" />
+                </linearGradient>
+            </defs>
+            <path d="${pathD} L 40,12 L 0,12 Z" fill="url(#grad-${id})" />
+            <path d="${pathD}" stroke="${strokeColor}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+            <circle cx="${lastPt.x}" cy="${lastPt.y}" r="2" fill="${strokeColor}" />
+            <circle cx="${lastPt.x}" cy="${lastPt.y}" r="3" stroke="${isLight ? '#fff' : '#000'}" stroke-width="1" fill="none" />
         </svg>`;
     };
 
-        const config = vscode.workspace.getConfiguration("zeroquota");
-        
-        return `
+    const config = vscode.workspace.getConfiguration("zeroquota");
+
+    return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZeroQuota Dashboard</title>
+    <title>Overview</title>
     <link href="${this._view?.webview.asWebviewUri(vscode.Uri.joinPath(this._context.extensionUri, "node_modules", "@vscode", "codicons", "dist", "codicon.css"))}" rel="stylesheet" />
     <style>
         :root {
-            --bg-deep: #0a0a0a;
-            --bg-card: rgba(255, 255, 255, 0.03);
-            --border-subtle: rgba(255, 255, 255, 0.08);
-            --neon-green: #ccff00;
-            --text-main: #e2e8f0;
-            --text-muted: #94a3b8;
+            --bg-deep: ${palette.bgDeep};
+            --bg-card: ${palette.bgCard};
+            --border-subtle: ${palette.borderSubtle};
+            --progress-track: ${palette.progressTrack};
+            --input-bg: ${palette.inputBg};
+            --item-hover: ${palette.itemHover};
+            --button-hover: ${palette.buttonHover};
+            --neon-green: ${palette.neonGreen};
+            --neon-contrast: ${palette.neonContrast};
+            --neon-faint: ${palette.neonFaint};
+            --neon-badge: ${palette.neonBadge};
+            --neon-border: ${palette.neonBorder};
+            --neon-glow: ${palette.neonGlow};
+            --overlay-bg: ${palette.overlayBg};
+            --glow-strength: ${palette.glowStrength};
+            --text-main: ${palette.textMain};
+            --text-muted: ${palette.textMuted};
             --radius-lg: 12px;
             --radius-md: 8px;
             --font-main: 'Inter', var(--vscode-font-family), sans-serif;
@@ -439,23 +636,39 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         .header {
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: center;
             margin-bottom: 20px;
             padding: 0 4px;
+            position: relative;
         }
 
-        .header-title {
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: var(--text-muted);
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-brand img {
+            width: 40px;
+            height: 40px;
+            object-fit: contain;
+        }
+
+        .header-brand-text {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-main);
+            letter-spacing: 0.02em;
         }
 
         .header-actions {
             display: flex;
             gap: 12px;
             color: var(--text-muted);
+            position: absolute;
+            right: 4px;
+            top: 50%;
+            transform: translateY(-50%);
         }
 
         .header-actions .codicon {
@@ -548,7 +761,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
         .progress-container {
             height: 8px;
-            background: rgba(255, 255, 255, 0.05);
+            background: var(--progress-track);
             border-radius: 4px;
             overflow: hidden;
             position: relative;
@@ -558,6 +771,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             height: 100%;
             border-radius: 4px;
             transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 0 var(--glow-strength) currentColor;
         }
 
         /* Brain Directory */
@@ -568,7 +782,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
         .search-input {
             width: 100%;
-            background: rgba(255, 255, 255, 0.05);
+            background: var(--input-bg);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-md);
             padding: 8px 32px 8px 12px;
@@ -613,7 +827,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         }
 
         .tree-item:hover {
-            background: rgba(255, 255, 255, 0.05);
+            background: var(--item-hover);
         }
 
         .tree-folder-title {
@@ -644,7 +858,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
         .plan-badge {
             background: var(--neon-green);
-            color: black;
+            color: var(--neon-contrast);
             font-size: 10px;
             font-weight: 800;
             padding: 2px 6px;
@@ -683,18 +897,18 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         }
 
         .btn:hover {
-            background: rgba(255, 255, 255, 0.08);
+            background: var(--button-hover);
             border-color: var(--text-muted);
         }
 
         .btn-primary {
             background: var(--neon-green);
-            color: black;
+            color: var(--neon-contrast);
             border: none;
         }
 
         .btn-primary:hover {
-            background: #b3df00;
+            background: var(--neon-border);
             transform: translateY(-1px);
         }
 
@@ -728,7 +942,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(10, 10, 10, 0.95);
+            background: var(--overlay-bg);
             backdrop-filter: blur(20px);
             z-index: 100;
             padding: 24px;
@@ -768,7 +982,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
         select {
             width: 100%;
-            background: #1a1a1a;
+            background: var(--input-bg);
             border: 1px solid var(--border-subtle);
             color: var(--text-main);
             padding: 10px 12px;
@@ -776,7 +990,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             outline: none;
             cursor: pointer;
             appearance: none;
-            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
             background-repeat: no-repeat;
             background-position: right 12px center;
             background-size: 16px;
@@ -785,7 +999,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
         select:focus {
             border-color: var(--neon-green);
-            box-shadow: 0 0 0 2px rgba(204, 255, 0, 0.1);
+            box-shadow: 0 0 0 2px var(--neon-glow);
         }
 
         select:hover {
@@ -793,7 +1007,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         }
 
         option {
-            background-color: #1a1a1a;
+            background-color: var(--input-bg);
             color: var(--text-main);
             padding: 10px;
         }
@@ -809,7 +1023,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             display: flex;
             align-items: center;
             gap: 8px;
-            background: #1a1a1a;
+            background: var(--input-bg);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-md);
             padding: 2px 12px 2px 2px;
@@ -845,11 +1059,9 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
     <div class="header">
-        <div class="header-title" style="display: flex; align-items: center; gap: 8px;">
-            <img src="${this._view?.webview.asWebviewUri(vscode.Uri.joinPath(this._context.extensionUri, "assets", "icons", "ZeroQuota.svg"))}" width="16" height="16" style="filter: drop-shadow(0 0 5px var(--neon-green)44);">
-            <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="color: var(--neon-green); font-size: 8px;">●</span> TELEMETRY ACTIVE
-            </div>
+        <div class="header-brand">
+            <img src="${getBrandLogo()}" alt="ZeroQuota" />
+            <span class="header-brand-text">ZeroQuota</span>
         </div>
         <div class="header-actions">
             <span class="codicon codicon-settings-gear" onclick="toggleSettings()"></span>
@@ -931,13 +1143,13 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     <div class="scrollable" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; padding-right: 4px;">
         <!-- Plan Info Card -->
         <div class="card" style="display: flex; align-items: center; gap: 16px; padding: 16px; margin-bottom: 20px;">
-            <div style="width: 48px; height: 48px; border-radius: 50%; background: rgba(204, 255, 0, 0.08); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+            <div style="width: 48px; height: 48px; border-radius: 50%; background: var(--neon-faint); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                 <span class="codicon codicon-account" style="color: var(--neon-green); font-size: 24px;"></span>
             </div>
             <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 14px; font-weight: 700; color: #ffffff;">Account</span>
-                    <span style="font-size: 10px; font-weight: 800; color: var(--neon-green); background: rgba(204, 255, 0, 0.1); border: 1px solid rgba(204, 255, 0, 0.3); padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">${tier}</span>
+                    <span style="font-size: 14px; font-weight: 700; color: var(--text-main);">Account</span>
+                    <span style="font-size: 10px; font-weight: 800; color: var(--neon-green); background: var(--neon-badge); border: 1px solid var(--neon-border); padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">${tier}</span>
                 </div>
                 <span style="font-size: 11px; font-weight: 500; color: var(--text-muted);">${email}</span>
             </div>
@@ -951,11 +1163,13 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
                     Model Usage
                 </div>
                 <div class="card-actions">
-                    <span class="codicon codicon-info" title="Real-time telemetry and burn-rate tracking. History visualizes the last rolling 5 hour window."></span>
+                    <span class="codicon codicon-info" title="• Real-time API quota telemetry&#10;• High-fidelity burn-rate tracking&#10;• Spikes show token use intensity&#10;• Resets follow provider cycles"></span>
                 </div>
             </div>
 
-            ${config.get<any>("modelPicker", {})?.geminiPro !== false ? `
+            ${
+              config.get<ModelPickerConfig>("modelPicker", {})?.geminiPro !== false
+                ? `
             <div class="quota-item">
                 <div class="quota-info">
                     <div class="quota-label">
@@ -965,16 +1179,20 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
                     <div class="quota-percentage" style="color: ${getColor(proFrac)}">${proPct}%</div>
                 </div>
                 <div class="progress-container">
-                    <div class="progress-fill" style="width: ${proPct}%; background: ${getColor(proFrac)}; box-shadow: 0 0 10px ${getColor(proFrac)}44;"></div>
+                    <div class="progress-fill" style="width: ${proPct}%; background: ${getColor(proFrac)}; --glow-strength: ${palette.glowStrength === "0px" ? "0px" : "10px"}; color: ${getColor(proFrac)}44;"></div>
                 </div>
                 <div class="quota-meta">
                     <span>Reset in: ${proReset}</span>
-                    <span>${getSparkline(proLabel)}</span>
+                    <span>${getSparkline(proLabel, getColor(proFrac))}</span>
                 </div>
             </div>
-            ` : ""}
+            `
+                : ""
+            }
 
-            ${config.get<any>("modelPicker", {})?.geminiFlash !== false ? `
+            ${
+              config.get<ModelPickerConfig>("modelPicker", {})?.geminiFlash !== false
+                ? `
             <div class="quota-item">
                 <div class="quota-info">
                     <div class="quota-label">
@@ -984,16 +1202,20 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
                     <div class="quota-percentage" style="color: ${getColor(flashFrac)}">${flashPct}%</div>
                 </div>
                 <div class="progress-container">
-                    <div class="progress-fill" style="width: ${flashPct}%; background: ${getColor(flashFrac)}; box-shadow: 0 0 10px ${getColor(flashFrac)}44;"></div>
+                    <div class="progress-fill" style="width: ${flashPct}%; background: ${getColor(flashFrac)}; --glow-strength: ${palette.glowStrength === "0px" ? "0px" : "10px"}; color: ${getColor(flashFrac)}44;"></div>
                 </div>
                 <div class="quota-meta">
                     <span>Reset in: ${flashReset}</span>
-                    <span>${getSparkline(flashLabel)}</span>
+                    <span>${getSparkline(flashLabel, getColor(flashFrac))}</span>
                 </div>
             </div>
-            ` : ""}
+            `
+                : ""
+            }
 
-            ${config.get<any>("modelPicker", {})?.claude !== false ? `
+            ${
+              config.get<ModelPickerConfig>("modelPicker", {})?.claude !== false
+                ? `
             <div class="quota-item">
                 <div class="quota-info">
                     <div class="quota-label">
@@ -1003,16 +1225,20 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
                     <div class="quota-percentage" style="color: ${getColor(claudeFrac)}">${claudePct}%</div>
                 </div>
                 <div class="progress-container">
-                    <div class="progress-fill" style="width: ${claudePct}%; background: ${getColor(claudeFrac)}; box-shadow: 0 0 10px ${getColor(claudeFrac)}44;"></div>
+                    <div class="progress-fill" style="width: ${claudePct}%; background: ${getColor(claudeFrac)}; --glow-strength: ${palette.glowStrength === "0px" ? "0px" : "10px"}; color: ${getColor(claudeFrac)}44;"></div>
                 </div>
                 <div class="quota-meta">
                     <span>Reset in: ${claudeReset}</span>
-                    <span>${getSparkline(claudeLabel)}</span>
+                    <span>${getSparkline(claudeLabel, getColor(claudeFrac))}</span>
                 </div>
             </div>
-            ` : ""}
+            `
+                : ""
+            }
 
-            ${config.get<any>("modelPicker", {})?.gptOss !== false ? `
+            ${
+              config.get<ModelPickerConfig>("modelPicker", {})?.gptOss !== false
+                ? `
             <div class="quota-item">
                 <div class="quota-info">
                     <div class="quota-label">
@@ -1022,14 +1248,16 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
                     <div class="quota-percentage" style="color: ${getColor(gptFrac)}">${gptPct}%</div>
                 </div>
                 <div class="progress-container">
-                    <div class="progress-fill" style="width: ${gptPct}%; background: ${getColor(gptFrac)}; box-shadow: 0 0 10px ${getColor(gptFrac)}44;"></div>
+                    <div class="progress-fill" style="width: ${gptPct}%; background: ${getColor(gptFrac)}; --glow-strength: ${palette.glowStrength === "0px" ? "0px" : "10px"}; color: ${getColor(gptFrac)}44;"></div>
                 </div>
                 <div class="quota-meta">
                     <span>Reset in: ${gptReset}</span>
-                    <span>${getSparkline(gptLabel)}</span>
+                    <span>${getSparkline(gptLabel, getColor(gptFrac))}</span>
                 </div>
             </div>
-            ` : ""}
+            `
+                : ""
+            }
         </div>
 
         <!-- Brain Directory Card -->
@@ -1039,7 +1267,10 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
                     <span class="codicon codicon-folder-active"></span>
                     Brain Directory
                 </div>
-                <span id="folder-count-badge" class="tree-count">${folderCount} Folders</span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <span id="folder-count-badge" class="tree-count">${folderCount} Folders</span>
+                    <span class="codicon codicon-info" title="• Implementation plans & task logs&#10;• Shared media & conversation assets&#10;• Organized naturally by session&#10;• Persistent workspace storage" style="font-size: 11px; cursor: help; color: var(--text-muted); opacity: 0.8;"></span>
+                </div>
             </div>
 
             <div class="search-container">

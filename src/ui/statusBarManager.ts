@@ -8,10 +8,11 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import { UserStatus } from "../types";
-import { getQuotaColor, getQuotaEmoji } from "./utils";
+import { getQuotaColor, getQuotaEmoji, getThemeColor } from "./utils";
 
 export class StatusBarManager {
   private statusBarItem: vscode.StatusBarItem;
+  private _latestStatus: UserStatus | null = null;
 
   constructor(private context: vscode.ExtensionContext) {
     this.statusBarItem = vscode.window.createStatusBarItem(
@@ -19,9 +20,13 @@ export class StatusBarManager {
       100,
     );
     this.statusBarItem.command = "zeroquota.statusBarAction";
+    this.context.subscriptions.push(
+      vscode.window.onDidChangeActiveColorTheme(() => this.update(this._latestStatus)),
+    );
   }
 
   update(status: UserStatus | null) {
+    this._latestStatus = status;
     if (!status) {
       this.statusBarItem.text = "$(circle-slash) Offline";
       this.statusBarItem.backgroundColor = new vscode.ThemeColor(
@@ -41,21 +46,24 @@ export class StatusBarManager {
     const parts: string[] = [];
 
     if (pro?.quotaInfo) {
-      const frac = pro.quotaInfo.remainingFraction;
+      const bFrac = pro.quotaInfo.remainingFraction;
+      const frac = isNaN(bFrac) ? 0 : bFrac;
       const pct = Math.round(frac * 100);
       const timer = this.formatResetTime(pro.quotaInfo.resetTime);
       parts.push(`${getQuotaEmoji(frac)} Pro ${pct}% ${timer}`);
     }
 
     if (flash?.quotaInfo) {
-      const frac = flash.quotaInfo.remainingFraction;
+      const bFrac = flash.quotaInfo.remainingFraction;
+      const frac = isNaN(bFrac) ? 0 : bFrac;
       const pct = Math.round(frac * 100);
       const timer = this.formatResetTime(flash.quotaInfo.resetTime);
       parts.push(`${getQuotaEmoji(frac)} Flash ${pct}% ${timer}`);
     }
 
     if (opus?.quotaInfo) {
-      const frac = opus.quotaInfo.remainingFraction;
+      const bFrac = opus.quotaInfo.remainingFraction;
+      const frac = isNaN(bFrac) ? 0 : bFrac;
       const timer = this.formatResetTime(opus.quotaInfo.resetTime);
       parts.push(`${getQuotaEmoji(frac)} Claude ${timer}`);
     }
@@ -72,6 +80,7 @@ export class StatusBarManager {
     const md = new vscode.MarkdownString("", true);
     md.isTrusted = true;
     md.supportHtml = true;
+    const isLight = vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light;
     // Root container with much wider fixed width and added padding for height
     md.appendMarkdown(`<div style="width: 500px; padding: 16px 8px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">`);
 
@@ -94,7 +103,8 @@ export class StatusBarManager {
       md.appendMarkdown(`</td>`);
     }
     md.appendMarkdown(`<td style="vertical-align: middle;">`);
-    md.appendMarkdown(`<strong style="color: #ffffff; font-size: 16px; letter-spacing: 0.5px;">ZEROQUOTA</strong>`);
+    const headerColor = isLight ? "#000000" : "#ffffff";
+    md.appendMarkdown(`<strong style="color: ${headerColor}; font-size: 16px; letter-spacing: 0.5px;">ZEROQUOTA</strong>`);
     md.appendMarkdown(`</td>`);
     md.appendMarkdown(`</tr></table>`);
     md.appendMarkdown(`</td>`);
@@ -108,9 +118,11 @@ export class StatusBarManager {
     
     md.appendMarkdown(`<td align="right" style="vertical-align: middle; text-align: right; padding-right: 12px;">`);
     md.appendMarkdown(`<div style="margin-bottom: 2px;">`);
-    md.appendMarkdown(`<strong style="font-size: 13px; color: #ffffff;">Account</strong>`);
+    const accTitleColor = isLight ? "#333333" : "#ffffff";
+    const accTierColor = isLight ? "#666666" : "#e2e8f0";
+    md.appendMarkdown(`<strong style="font-size: 13px; color: ${accTitleColor};">Account</strong>`);
     md.appendMarkdown(`&nbsp;&nbsp;`);
-    md.appendMarkdown(`<span style="font-size: 12px; color: #e2e8f0; font-weight: 500;">${status.tier}</span>`);
+    md.appendMarkdown(`<span style="font-size: 12px; color: ${accTierColor}; font-weight: 500;">${status.tier}</span>`);
     md.appendMarkdown(`</div>`);
     md.appendMarkdown(`<div style="font-size: 11px; color: #9ca3af;">${status.email}</div>`);
     md.appendMarkdown(`</td>`);
@@ -154,7 +166,8 @@ export class StatusBarManager {
       if (displayedModels.has(displayName)) continue;
       displayedModels.add(displayName);
 
-      const frac = m.quotaInfo.remainingFraction;
+      const bFrac = m.quotaInfo.remainingFraction;
+      const frac = isNaN(bFrac) ? 0 : bFrac;
       const pct = Math.round(frac * 100);
       const reset = this.formatResetTime(m.quotaInfo.resetTime);
       
@@ -172,7 +185,7 @@ export class StatusBarManager {
     });
 
     for (const item of itemsToDisplay) {
-      const statusColor = getQuotaColor(item.frac);
+      const statusColor = getThemeColor(getQuotaColor(item.frac));
       const circleSvg = this.generateStatusCircle(statusColor);
       const progressBar = this.generateProgressBar(item.frac, statusColor);
       const brandIcon = this.getBrandIcon(item.displayName);
@@ -185,7 +198,9 @@ export class StatusBarManager {
       if (brandIcon) {
         md.appendMarkdown(`<img src="${brandIcon}" width="18" height="18" /> &nbsp; `);
       }
-      md.appendMarkdown(`<span style="font-size: 14px; font-weight: 600; color: #eeeeee;">${item.displayName}</span>`);
+      const nameColor = isLight ? "#333333" : "#eeeeee";
+      const pctColor = isLight ? "#000000" : "#ffffff";
+      md.appendMarkdown(`<span style="font-size: 14px; font-weight: 600; color: ${nameColor};">${item.displayName}</span>`);
       md.appendMarkdown(`</td>`);
 
       // Progress Bar - tight fit (280px total width)
@@ -195,7 +210,7 @@ export class StatusBarManager {
 
       // Percentage & Reset - left aligned with left padding
       md.appendMarkdown(`<td style="text-align: left; padding-left: 8px; white-space: nowrap; padding-bottom: 12px;">`);
-      md.appendMarkdown(`<span style="font-size: 14px; color: #ffffff; font-weight: 700;">${item.pct}%</span> &nbsp; `);
+      md.appendMarkdown(`<span style="font-size: 14px; color: ${pctColor}; font-weight: 700;">${item.pct}%</span> &nbsp; `);
       md.appendMarkdown(`<span style="color: #666666; font-size: 11px;">$(history) ${item.reset}</span>`);
       md.appendMarkdown(`</td>`);
 
@@ -217,9 +232,14 @@ export class StatusBarManager {
 
   private getAppLogo(): string {
     const iconPath = path.join(this.context.extensionPath, "assets", "icons", "ZeroQuota Logo Primary Color.svg");
+    const isLight = vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light;
     try {
       if (fs.existsSync(iconPath)) {
-        const content = fs.readFileSync(iconPath, "utf8");
+        let content = fs.readFileSync(iconPath, "utf8");
+        // If light mode, we should swap #cf0 (neon) with #000 (black) in the logo SVG
+        if (isLight) {
+           content = content.replace(/#cf0/gi, "#000");
+        }
         const b64 = Buffer.from(content).toString("base64");
         return `data:image/svg+xml;base64,${b64}`;
       }
@@ -240,12 +260,14 @@ export class StatusBarManager {
 
     try {
       const iconPath = path.join(this.context.extensionPath, "assets", "brands", filename);
+      const isLight = vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light;
       if (fs.existsSync(iconPath)) {
         const content = fs.readFileSync(iconPath, "utf8");
-        // For brand icons, let's use a cleaner white/light-grey for better contrast
+        // For brand icons, we use dark grey in light mode, and light grey in dark mode
+        const iconColor = isLight ? "#444444" : "#d1d5db";
         const coloredContent = content.replace(
           /fill="currentColor"/g,
-          'fill="#d1d5db"',
+          `fill="${iconColor}"`,
         );
         const b64 = Buffer.from(coloredContent).toString("base64");
         return `data:image/svg+xml;base64,${b64}`;
@@ -276,16 +298,21 @@ export class StatusBarManager {
     const width = 140;
     const height = 10;
     const filledWidth = Math.max(0, Math.min(width, width * fraction));
+    const themeKind = vscode.window.activeColorTheme.kind;
+    const isLight = themeKind === vscode.ColorThemeKind.Light;
+    const trackColor = isLight ? "rgba(0,0,0,0.06)" : "rgba(255, 255, 255, 0.1)";
 
-    // Dashboard-style progress bar with background track and glow
+    // Dashboard-style progress bar with background track and optional glow
+    const glow = isLight ? "" : `filter: drop-shadow(0 0 2px ${color});`;
     const svg = `
     <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
-      <rect width="${width}" height="${height}" rx="5" fill="#374151" stroke="rgba(255,255,255,0.05)" stroke-width="0.5" />
-      <rect width="${filledWidth}" height="${height}" rx="5" fill="${color}" style="filter: drop-shadow(0 0 2px ${color});" />
+      <rect width="${width}" height="${height}" rx="5" fill="${trackColor}" stroke="none" />
+      <rect width="${filledWidth}" height="${height}" rx="5" fill="${color}" style="${glow}" />
     </svg>`.trim();
     const b64 = Buffer.from(svg).toString("base64");
     return `data:image/svg+xml;base64,${b64}`;
   }
+
 
   private formatResetTime(resetTimeStr?: string): string {
     if (!resetTimeStr) return "N/A";
@@ -307,10 +334,13 @@ export class StatusBarManager {
   }
 
   private generateAccountCircle(): string {
+    const brandColor = getThemeColor("#ccff00");
+    const isLight = vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light;
+    const bgColor = isLight ? "rgba(0,0,0,0.05)" : "rgba(204, 255, 0, 0.08)";
     const svg = `
     <svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="24" cy="24" r="24" fill="rgba(204, 255, 0, 0.08)" />
-      <g transform="translate(12, 12)" fill="#ccff00">
+      <circle cx="24" cy="24" r="24" fill="${bgColor}" />
+      <g transform="translate(12, 12)" fill="${brandColor}">
         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
       </g>
     </svg>`.trim();

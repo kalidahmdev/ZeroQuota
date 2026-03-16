@@ -4,6 +4,8 @@
  * Licensed under the MIT License
  */
 
+import * as vscode from "vscode";
+
 /**
  * Returns the hex color code for a given quota fraction.
  * Red: 0-20% (<= 0.2)
@@ -24,4 +26,16 @@ export function getQuotaEmoji(frac: number): string {
   if (frac <= 0.2) return "🟥";
   if (frac <= 0.6) return "🟨";
   return "🟩";
+}
+
+/**
+ * Returns a theme-aware color for the brand neon green.
+ * In light themes, it returns Black for contrast.
+ */
+export function getThemeColor(color: string): string {
+  const isLight = vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light;
+  if (isLight && (color === "#ccff00" || color.toLowerCase() === "premium neon")) {
+    return "#000000";
+  }
+  return color;
 }
