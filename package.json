@@ -134,7 +134,7 @@
     "axios-mock-adapter": "^2.1.0",
     "c8": "^9.1.0",
     "chai": "^4.5.0",
-    "esbuild": "^0.27.3",
+    "esbuild": "^0.28.2",
     "eslint": "^8.57.0",
     "fantasticon": "^4.1.0",
     "sinon": "^17.0.1",
@@ -144,6 +144,6 @@
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.44",
-    "axios": "^1.7.2"
+    "axios": "^1.20.0"
   }
 }
