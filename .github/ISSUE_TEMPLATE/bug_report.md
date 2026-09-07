@@ -23,9 +23,9 @@ A clear and concise description of what you expected to happen.
 If applicable, add screenshots to help explain your problem.
 
 **Environment (please complete the following information):**
- - IDE Version: [e.g. 1.90.0]
- - ZeroQuota Version: [e.g. 1.0.0]
- - OS: [e.g. Windows, macOS]
+ - IDE: [e.g. VS Code 1.90.0, Antigravity IDE]
+ - ZeroQuota Version: [e.g. 2.0.0]
+ - OS: [e.g. Windows 11, macOS Sequoia, Ubuntu 24.04]
 
 **Additional context**
 Add any other context about the problem here.

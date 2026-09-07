@@ -16,13 +16,23 @@ suite('Orchestrator Tests', () => {
   let clock: sinon.SinonFakeTimers;
 
   setup(() => {
-    context = { subscriptions: [] };
+    context = {
+      subscriptions: [],
+      extensionUri: { fsPath: '/test/path' },
+      globalState: {
+        get: sinon.stub().returns(false),
+        update: sinon.stub().resolves()
+      }
+    };
     sidecarStub = sinon.createStubInstance(SidecarService);
     statusBarStub = sinon.createStubInstance(StatusBarManager);
     dashboardStub = sinon.createStubInstance(DashboardViewProvider);
     sinon.stub(vscode.extensions, 'getExtension').returns({ exports: { orchestrator: { sidecar: sidecarStub, statusBar: statusBarStub, dashboard: dashboardStub } } } as any);
     clock = sinon.useFakeTimers();
     orchestrator = new Orchestrator(context as vscode.ExtensionContext);
+    (orchestrator as any).sidecar = sidecarStub;
+    (orchestrator as any).statusBar = statusBarStub;
+    (orchestrator as any).dashboard = dashboardStub;
   });
 
   teardown(() => {
@@ -54,6 +64,8 @@ suite('Orchestrator Tests', () => {
   });
 
   test('detect reset (prev <1 → 1.0)', async () => {
+    (context.globalState.get as sinon.SinonStub).returns(true);
+    (orchestrator as any).previousFractions = { 'claude-sonnet-4-6': 0.5 };
     sinon.stub(vscode.workspace, 'getConfiguration').returns({ get: sinon.stub().returns(60) } as any);
     const notifyStub = sinon.stub(vscode.window, 'showInformationMessage');
     const statusReset: UserStatus = {

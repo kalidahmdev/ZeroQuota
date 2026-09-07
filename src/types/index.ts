@@ -15,13 +15,23 @@ export interface ModelConfig {
 }
 
 export interface UserStatus {
+  name?: string;
   email: string;
   tier: string;
+  profilePictureUrl?: string;
   modelConfigs: ModelConfig[];
+  activeModel?: string;
+  activeModelLabel?: string;
   promptCredits: number;
   availablePromptCredits: number;
   flowCredits: number;
   availableFlowCredits: number;
+}
+
+export interface TrajectoryInfo {
+  summary: string;
+  stepCount: number;
+  lastModifiedTime?: string;
 }
 
 export interface ModelPickerConfig {

@@ -2,26 +2,38 @@
   <img src="assets/icons/store-logo.png" alt="ZeroQuota Logo" width="160">
 </p>
 
-<h1 align="center">ZeroQuota</h1>
+<h1 align="center">ZeroQuota v2.0</h1>
 
 <p align="center">
-  <strong>Premium AI Quota Monitoring & Automation for Antigravity IDE.</strong><br>
-  <em>Real-time telemetry, automated discovery, and a stunning Glassmorphism interface.</em>
+  <strong>The Essential AI Quota Monitoring, Telemetry & Workspace Suite for Google Antigravity.</strong><br>
+  <em>Built specifically for Antigravity — now working seamlessly whether you code in the Antigravity IDE or in VS Code with the Antigravity extension.</em>
 </p>
 
 <p align="center">
-  <a href="#-key-features">Features</a> •
-  <a href="#-tech-stack">Stack</a> •
-  <a href="#-setup">Setup</a> •
-  <a href="#-testing">Testing</a> •
-  <a href="#-roadmap">Roadmap</a>
+  <a href="#-whats-new-in-v20">What's New in v2.0</a> •
+  <a href="#-key-features">Key Features</a> •
+  <a href="#-configuration">Configuration</a> •
+  <a href="#-commands">Commands</a> •
+  <a href="#-how-it-works">How It Works</a> •
+  <a href="#-getting-started">Getting Started</a> •
+  <a href="#-testing">Testing</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Platform-Antigravity%20IDE-ccff00?style=flat-square&logo=google" alt="Antigravity IDE">
+  <a href="https://marketplace.visualstudio.com/items?itemName=ZeroQuota.zeroquota">
+    <img src="https://img.shields.io/badge/Visual%20Studio%20Marketplace-Download-007ACC?style=flat-square&logo=visualstudiocode&logoColor=white" alt="Download on Visual Studio Marketplace">
+  </a>
+  <a href="https://open-vsx.org/extension/ZeroQuota/zeroquota">
+    <img src="https://img.shields.io/badge/Open%20VSX-Download-7B1FA2?style=flat-square&logo=eclipseide&logoColor=white" alt="Download on Open VSX">
+  </a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Version-2.0.0-blue?style=flat-square" alt="Version 2.0.0">
+  <img src="https://img.shields.io/badge/Built%20For-Google%20Antigravity-ccff00?style=flat-square&logo=google&logoColor=black" alt="Google Antigravity">
+  <img src="https://img.shields.io/badge/Runs%20In-VS%20Code%20%7C%20Antigravity%20IDE-23272E?style=flat-square&logo=visualstudiocode" alt="VS Code & Antigravity IDE">
   <img src="https://img.shields.io/badge/TypeScript-v5.4-3178C6?style=flat-square&logo=typescript" alt="TypeScript">
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License MIT">
-  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square" alt="PRs Welcome">
 </p>
 
 <p align="center">
@@ -30,106 +42,158 @@
 
 ---
 
-## 🚀 Key Features
+## 🌟 What's New in v2.0 (Major Release)
 
-ZeroQuota provides high-fidelity telemetry for AI developers using the Antigravity IDE.
+ZeroQuota is built specifically for **Google Antigravity**. With the release of the official Antigravity extension for VS Code (`agy`), developers can now use Antigravity inside standard VS Code as well as inside the standalone Antigravity IDE.
 
-### 📊 Quota Telemetry
+**ZeroQuota v2.0 brings full compatibility to both environments**: whether you are running the standalone Antigravity IDE or working in VS Code with the Antigravity extension installed, ZeroQuota automatically hooks into your local Antigravity sidecar service without any manual setup.
 
-| Feature                  | Description                                                      |
-| :----------------------- | :--------------------------------------------------------------- |
-| **Real-Time Monitoring** | Live tracking for Gemini 3 Pro, Flash, Claude, and GPT OSS.      |
-| **Visual Sparklines**    | Dynamic SVG history representing rolling 5-hour usage telemetry. |
-| **Smart Indicators**     | Color-coded urgency (Green → Yellow → Red) based on burn rates.  |
-
-### 🧠 Automation & Integration
-
-| Feature                | Description                                                                         |
-| :--------------------- | :---------------------------------------------------------------------------------- |
-| **Auto-Discovery**     | Detects the Antigravity `language_server` process and CSRF tokens automatically.    |
-| **Brain Inspector**    | Integrated tree-view for the `~/.gemini/antigravity/brain` directory.               |
-| **Global Status**      | High-visibility status bar indicators with interactive Markdown tooltips.           |
-| **Theme-Aware Design** | Seamlessly adapts to Antigravity's Light and Dark themes for consistent visibility. |
+### Major Highlights:
+- 🚀 **VS Code + Antigravity IDE Dual Compatibility**: ZeroQuota auto-detects Antigravity whether it's running via the standalone IDE (`language_server`) or the VS Code Antigravity Extension (`agy --hub`).
+- ⚡ **Adaptive Smart-Cascade Polling**: When your Antigravity quotas are depleted (0%), ZeroQuota shifts into smart sleep mode and wakes up right at the reset time, preserving CPU and laptop battery.
+- 🎯 **Accurate Shared Quota Pools**: Matches Antigravity's real-world quota allocation:
+  - **Gemini Pool**: Gemini 3 Pro (High) & Gemini 3 Flash.
+  - **Claude Pool**: Claude 3.5/3.7 Sonnet & GPT-OSS.
+- 📜 **Cascade Trajectory & Session Tracking**: Monitor active Cascade trajectories, session step counts, and last modified timestamps right from the sidebar dashboard.
+- 🔔 **Proactive Notifications**: Set custom quota thresholds (e.g. 25%, 15%, 5%) for low-quota alerts, plus celebration notifications when quotas reset to 100%.
+- 🧰 **Antigravity Quick Action Hub**: One-click access to MCP config (`mcp_config.json` with auto-scaffolding), Rules (`GEMINI.md`), Agent Skills (`.agents/skills`), and Brain storage (`~/.gemini/antigravity/brain`).
+- 🎨 **Revamped Glassmorphism Dashboard**: Modern theme-aware tokens, responsive quick-settings drawer (`Esc` to close), neon percentage rings, and brand badges.
 
 ---
 
-## 🛠️ Tech Stack & Architecture
+## 🚀 Key Features
 
-- **Core**: [TypeScript](https://www.typescriptlang.org/) (Strict Mode)
-- **UI**: Vanilla HTML5/CSS3 with Glassmorphism Design Tokens.
-- **Runtime**: Antigravity IDE Extension Host.
-- **Build**: [esbuild](https://esbuild.github.io/) for near-instant bundling.
+### 📊 Antigravity Quota Telemetry & Pool Intelligence
 
-### 📂 Directory Map
+| Feature | Description |
+| :--- | :--- |
+| **Real-Time Antigravity Tracking** | Tracks all models available under Antigravity: Gemini 3 Pro, Gemini Flash, Claude Sonnet, and GPT-OSS. |
+| **Shared Quota Pool Modeling** | Reflects Antigravity's shared pools so you see unified limits rather than redundant or contradictory figures. |
+| **Status Bar Monitor** | Compact status bar metrics with dynamic color-coded urgency emojis (`🟢` `🟡` `🔴`) and countdown timers. |
+| **Interactive Tooltip Card** | Hover over the status bar item to view your account profile picture, user tier, remaining model percentages, and reset countdowns. |
+| **One-Click Refresh** | Click the status bar or dashboard refresh button for an instant quota update. |
+
+### ⚡ Smart Polling & Battery Optimization
+
+| Feature | Description |
+| :--- | :--- |
+| **Configurable Frequencies** | Choose between `Real-time (10s)`, `1m`, `5m`, or `Manual` polling. |
+| **Adaptive Smart Cascade** | When all active quotas hit 0%, ZeroQuota automatically reduces polling frequency and schedules precision wake-ups near reset time. |
+| **Anti-Spam Thresholds** | Quota warning alerts fire once per threshold crossing and latch until quotas recover. |
+
+### 🧠 Antigravity Workspace Tools & Quick Actions
+
+| Tool | Action & Shortcut |
+| :--- | :--- |
+| **MCP Config Hub** | Opens `~/.gemini/config/mcp_config.json` (or legacy path), automatically creating directory and starter config if absent. |
+| **Rules Editor** | Opens workspace `GEMINI.md` or global `~/.gemini/GEMINI.md` to quickly configure agent rules. |
+| **Skills & Workflows** | Fast navigation to `.agents/skills`, `.agents/workflows`, or global `~/.gemini/skills`. |
+| **Brain Inspector** | Direct access to the local Antigravity brain directory (`~/.gemini/antigravity/brain`). |
+| **Session Trajectories** | Inspect recent Antigravity Cascade trajectories with step counts and timestamps. |
+
+---
+
+## ⚙️ Configuration
+
+Configure ZeroQuota via Settings (`Ctrl+,` / `Cmd+,` searching for `ZeroQuota`), or use the **in-dashboard Quick Settings drawer**:
+
+| Setting | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `zeroquota.refreshRate` | `string` | `"1m"` | Polling frequency (`"Real-time"`, `"1m"`, `"5m"`, `"Manual"`). |
+| `zeroquota.adaptivePolling` | `boolean` | `true` | Throttles polling when quotas are at 0% and wakes up at reset time to save CPU & battery. |
+| `zeroquota.notificationThreshold` | `integer` | `25` | Percentage threshold to trigger low-quota warning notifications (e.g. 5, 10, 15, 25, 50). |
+| `zeroquota.notifyOnReset` | `boolean` | `false` | Shows desktop notification when Antigravity AI quotas recover to 100%. |
+| `zeroquota.modelPicker` | `object` | `{...}` | Toggle individual model groups (`geminiPro`, `geminiFlash`, `claude`, `gptOss`). |
+| `zeroquota.autoSyncBrain` | `boolean` | `true` | Periodically check the local Brain Directory for changes. |
+
+---
+
+## ⌨️ Commands
+
+| Command | Title | Purpose |
+| :--- | :--- | :--- |
+| `zeroquota.refresh` | `ZeroQuota: Refresh Quota` | Force an immediate poll and refresh all UI components. |
+| `zeroquota.openMcpConfig` | `ZeroQuota: Open MCP Config` | Open `mcp_config.json` with auto-creation. |
+| `zeroquota.openRules` | `ZeroQuota: Open Rules (GEMINI.md)` | Open workspace or global Antigravity rules. |
+| `zeroquota.openSkills` | `ZeroQuota: Open Antigravity Skills` | Open project or global agent skills directory. |
+| `zeroquota.openWorkflows` | `ZeroQuota: Open Workflows (Legacy)` | Backwards-compatible alias for agent skills. |
+| `zeroquota.openBrain` | `ZeroQuota: Open Brain Folder` | Open the Antigravity local brain cache folder. |
+
+---
+
+## 🛠️ How It Works
+
+ZeroQuota communicates directly with the local Antigravity sidecar via gRPC-web / Connect-Protocol without requiring any external cloud proxy or personal API keys.
 
 ```text
-ZeroQuota/
-├── assets/           # Logos, icons, and UI screenshots
-├── src/
-│   ├── core/         # Orchestrator & state synchronization
-│   ├── services/     # Process discovery & sidecar API
-│   ├── ui/           # Webview providers & status bar management
-│   └── extension.ts  # Extension entry point
-└── package.json      # Dependencies & configuration
+┌────────────────────────────────────────────────────────┐
+│                   ZeroQuota v2.0                       │
+│      (Sidebar Webview + Status Bar + Orchestrator)     │
+└───────────────────────────┬────────────────────────────┘
+                            │
+               Antigravity Auto-Discovery
+             (WMI / PowerShell / POSIX ps)
+                            │
+            ┌───────────────┴───────────────┐
+            ▼                               ▼
+  [ Antigravity IDE ]             [ VS Code Extension ]
+  language_server binary          agy --hub process
+  --csrf_token / --port           --hub-port / Hub Token
+            │                               │
+            └───────────────┬───────────────┘
+                            ▼
+     Connect-Protocol / LanguageServerService
+     • GetUserStatus (Quotas, Tier, Account)
+     • GetAllCascadeTrajectories (Recent Sessions)
 ```
+
+- **In Antigravity IDE**: ZeroQuota detects the running `language_server` process, extracts its CSRF token and port, and connects locally.
+- **In VS Code**: ZeroQuota detects the Antigravity extension's background process (`agy --hub`), retrieves the listening port and token from the hub endpoint, and seamlessly binds to the service.
 
 ---
 
 ## 🏁 Getting Started
 
 ### Prerequisites
-
-- [Antigravity IDE](https://github.com/google/antigravity)
-- [Node.js v20+](https://nodejs.org/)
+- Google Antigravity installed:
+  - Either the standalone **Antigravity IDE**
+  - OR **VS Code v1.90+** with the official Antigravity Extension.
+- [Node.js v20+](https://nodejs.org/) (for development only).
 
 ### Installation
 
-1. Clone the repo: `git clone https://github.com/kalidahmdev/ZeroQuota.git`
-2. Install dependencies: `npm install`
-3. Launch extension: Hit `F5` in VS Code to start debugging.
+#### From VS Code Marketplace or Open VSX:
+
+[![Install from VS Code Marketplace](https://img.shields.io/badge/Visual%20Studio%20Marketplace-Install-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=ZeroQuota.zeroquota)
+[![Install from Open VSX](https://img.shields.io/badge/Open%20VSX-Install-7B1FA2?style=for-the-badge&logo=eclipseide&logoColor=white)](https://open-vsx.org/extension/ZeroQuota/zeroquota)
+
+1. Or search for **ZeroQuota** in your Extensions tab (`Ctrl+Shift+X` / `Cmd+Shift+X`).
+2. Click **Install**.
+3. ZeroQuota will automatically activate and start monitoring your Antigravity quotas.
+
+#### From VSIX:
+1. Download `zeroquota-2.0.0.vsix` from the [Releases](https://github.com/kalidahmdev/ZeroQuota/releases) page.
+2. In VS Code or Antigravity IDE, press `Ctrl+Shift+P` and choose **Extensions: Install from VSIX...**
+3. Select the `.vsix` file.
 
 ---
 
-## 🧪 Testing & Quality 🧪
+## 🧪 Testing & Quality Assurance
 
-| Test Type      | Tool               | Purpose                                             |
-| :------------- | :----------------- | :-------------------------------------------------- |
-| **Unit Tests** | Vitest             | Validates core logic and server discovery.          |
-| **Mocking**    | Axios Mock Adapter | Simulates API responses for robust offline testing. |
-| **Linting**    | ESLint             | Ensures code quality and type-safety.               |
-
-Execute all tests:
+ZeroQuota includes an automated dual test suite with 39 tests covering all orchestrator states, process discovery, sidecar communication, and status bar logic:
 
 ```bash
+# Run unit & integration tests with linting and compilation
 npm run test:full
+
+# Run tests with vitest
+npm test
 ```
-
----
-
-## 🗺️ Roadmap
-
-- [x] Multi-model quota monitoring
-- [x] Theme-Aware UI (Light/Dark mode adaptation)
-- [x] High-fidelity Sidebar Dashboard
-- [x] Automated Sidecar Discovery
-- [ ] Exportable usage reports (CSV/JSON)
-
----
-
-## 🤝 Contributing
-
-This is an open-source project and we welcome all contributions!
-
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
 
 ---
 
 ## 📜 License
 
-Distributed under the MIT License. See `LICENSE` for more information.
+Distributed under the MIT License. See [LICENSE](LICENSE) for more details.
 
-Developed with ❤️ by **[@kalidahmdev](https://github.com/kalidahmdev)**.
+Crafted with ❤️ for the Antigravity community by **[@kalidahmdev](https://github.com/kalidahmdev)**.

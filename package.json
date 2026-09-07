@@ -2,8 +2,8 @@
   "name": "zeroquota",
   "displayName": "ZeroQuota",
   "icon": "assets/icons/store-logo.png",
-  "description": "A premium, high-performance AI quota monitoring and automation suite for the Antigravity IDE, featuring real-time telemetry and advanced model management.",
-  "version": "1.0.2",
+  "description": "Premium AI quota monitoring and telemetry suite for Google Antigravity — supporting both VS Code (Antigravity extension) and the Antigravity IDE.",
+  "version": "2.0.0",
   "publisher": "ZeroQuota",
   "author": "kalidahmdev",
   "license": "MIT",
@@ -40,6 +40,21 @@
       {
         "command": "zeroquota.openMcpConfig",
         "title": "ZeroQuota: Open MCP Config",
+        "category": "ZeroQuota"
+      },
+      {
+        "command": "zeroquota.openRules",
+        "title": "ZeroQuota: Open Rules (GEMINI.md)",
+        "category": "ZeroQuota"
+      },
+      {
+        "command": "zeroquota.openSkills",
+        "title": "ZeroQuota: Open Antigravity Skills",
+        "category": "ZeroQuota"
+      },
+      {
+        "command": "zeroquota.openWorkflows",
+        "title": "ZeroQuota: Open Workflows (Legacy)",
         "category": "ZeroQuota"
       }
     ],
@@ -95,6 +110,11 @@
           ],
           "default": "1m",
           "description": "Polling frequency for quota updates."
+        },
+        "zeroquota.adaptivePolling": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically reduce polling frequency when all quotas are exhausted, waking up near reset time to save CPU & battery."
         },
         "zeroquota.autoSyncBrain": {
           "type": "boolean",

@@ -74,10 +74,11 @@ async function release() {
     }
 
     // 4. Git Flow
-    runCommand(`git add package.json package-lock.json`);
+    const currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: projectRoot }).toString().trim() || 'master';
+    runCommand(`git add package.json package-lock.json CHANGELOG.md README.md`);
     runCommand(`git commit -m "chore: release v${newVersion}"`);
     runCommand(`git tag -a v${newVersion} -m "Release v${newVersion}"`);
-    runCommand(`git push origin main`); // Assuming main, could be dynamic
+    runCommand(`git push origin ${currentBranch}`);
     runCommand(`git push origin v${newVersion}`);
 
     console.log(`\n✨ Release v${newVersion} successfully deployed!`);

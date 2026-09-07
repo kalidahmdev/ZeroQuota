@@ -8,7 +8,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
-import { UserStatus, ModelPickerConfig } from "../types";
+import { UserStatus, ModelConfig, ModelPickerConfig, TrajectoryInfo } from "../types";
 import { getQuotaColor } from "./utils";
 
 export class DashboardViewProvider implements vscode.WebviewViewProvider {
@@ -16,10 +16,16 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
   private _view?: vscode.WebviewView;
   private _latestStatus: UserStatus | null = null;
+  private _trajectories: Record<string, TrajectoryInfo> | null = null;
   private _updateInterval?: NodeJS.Timeout;
   private _usageHistory: Record<string, number[]> = {};
   private _settingsVisible: boolean = false;
+  private _pendingHtmlUpdate: boolean = false;
   private _lastSeenStatus: Record<string, { remaining: number; resetTime?: string }> = {};
+  private _collapsedSections: Record<string, boolean> = {
+    "model-usage": false,
+    "brain-directory": true,
+  };
 
   constructor(private readonly _context: vscode.ExtensionContext) {
     // Initialize usage history and last status from global state
@@ -60,6 +66,19 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         case "refresh":
           vscode.commands.executeCommand("zeroquota.refresh");
           break;
+        case "rules":
+          vscode.commands.executeCommand("zeroquota.openRules");
+          break;
+        case "skills":
+        case "workflows":
+          vscode.commands.executeCommand("zeroquota.openSkills");
+          break;
+        case "persistSectionState": {
+          if (message.section && typeof message.collapsed === "boolean") {
+            this._collapsedSections[message.section] = message.collapsed;
+          }
+          break;
+        }
         case "mcp":
           vscode.commands.executeCommand("zeroquota.openMcpConfig");
           break;
@@ -72,64 +91,116 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             vscode.Uri.file(message.path),
           );
           break;
-        case "persistSettingsState":
-          this._settingsVisible = message.visible;
+        case "persistSettingsState": {
+          const wasVisible = this._settingsVisible;
+          this._settingsVisible = Boolean(message.visible);
+          if (wasVisible && !this._settingsVisible && this._pendingHtmlUpdate) {
+            this._pendingHtmlUpdate = false;
+            this._updateHtml();
+          }
           break;
+        }
         case "saveSettings":
           (async () => {
-            // Save threshold to global state
+            const config = vscode.workspace.getConfiguration("zeroquota");
+
+            // Save threshold to global state and workspace configuration only if changed
             if (message.settings.threshold !== undefined) {
+              const numVal = parseInt(String(message.settings.threshold), 10);
               this._context.globalState.update(
                 "zeroquota.notificationThreshold",
                 message.settings.threshold,
               );
+              const currentThreshold = config.get<number>("notificationThreshold");
+              if (!isNaN(numVal) && numVal !== currentThreshold) {
+                await config.update(
+                  "notificationThreshold",
+                  numVal,
+                  vscode.ConfigurationTarget.Global,
+                );
+              }
             }
 
-            // Save notifyOnReset to global state
+            // Save notifyOnReset only if changed
             if (message.settings.notifyOnReset !== undefined) {
+              const newNotify = Boolean(message.settings.notifyOnReset);
               this._context.globalState.update(
                 "zeroquota.notifyOnReset",
-                message.settings.notifyOnReset,
+                newNotify,
               );
+              const currentNotify = config.get<boolean>("notifyOnReset");
+              if (currentNotify !== newNotify) {
+                await config.update(
+                  "notifyOnReset",
+                  newNotify,
+                  vscode.ConfigurationTarget.Global,
+                );
+              }
             }
 
-            // Save the rest to workspace configuration
-            const config = vscode.workspace.getConfiguration("zeroquota");
-
+            // Save modelPicker only if changed
             if (message.settings.modelPicker) {
-              await config.update(
-                "modelPicker",
-                message.settings.modelPicker,
-                vscode.ConfigurationTarget.Global,
-              );
-            }
-            if (message.settings.refreshRate) {
-              await config.update(
-                "refreshRate",
-                message.settings.refreshRate,
-                vscode.ConfigurationTarget.Global,
-              );
-            }
-            if (message.settings.autoSyncBrain !== undefined) {
-              await config.update(
-                "autoSyncBrain",
-                message.settings.autoSyncBrain,
-                vscode.ConfigurationTarget.Global,
-              );
+              const currentPicker = config.get<Record<string, boolean>>("modelPicker");
+              if (JSON.stringify(currentPicker) !== JSON.stringify(message.settings.modelPicker)) {
+                await config.update(
+                  "modelPicker",
+                  message.settings.modelPicker,
+                  vscode.ConfigurationTarget.Global,
+                );
+              }
             }
 
-            vscode.window.showInformationMessage(
-              "Settings saved successfully!",
-            );
+            // Save refreshRate only if changed
+            if (message.settings.refreshRate) {
+              const currentRate = config.get<string>("refreshRate");
+              if (currentRate !== message.settings.refreshRate) {
+                await config.update(
+                  "refreshRate",
+                  message.settings.refreshRate,
+                  vscode.ConfigurationTarget.Global,
+                );
+              }
+            }
+
+            // Save adaptivePolling only if changed
+            if (message.settings.adaptivePolling !== undefined) {
+              const newAdaptive = Boolean(message.settings.adaptivePolling);
+              const currentAdaptive = config.get<boolean>("adaptivePolling");
+              if (currentAdaptive !== newAdaptive) {
+                await config.update(
+                  "adaptivePolling",
+                  newAdaptive,
+                  vscode.ConfigurationTarget.Global,
+                );
+              }
+            }
+
+            // Save autoSyncBrain only if changed
+            if (message.settings.autoSyncBrain !== undefined) {
+              const newAutoSync = Boolean(message.settings.autoSyncBrain);
+              const currentAutoSync = config.get<boolean>("autoSyncBrain");
+              if (currentAutoSync !== newAutoSync) {
+                await config.update(
+                  "autoSyncBrain",
+                  newAutoSync,
+                  vscode.ConfigurationTarget.Global,
+                );
+              }
+            }
           })();
           break;
       }
     });
 
-    // Auto-refresh the brain directory periodically if the webview is visible
+    // Auto-refresh the brain directory periodically if the webview is visible and autoSyncBrain is enabled
     this._updateInterval = setInterval(() => {
       if (this._view?.visible) {
-        this._updateHtml();
+        const autoSync = vscode.workspace
+          .getConfiguration("zeroquota")
+          .get<boolean>("autoSyncBrain", true);
+        if (autoSync) {
+          this._updateHtml();
+        }
       }
     }, 5000);
 
@@ -147,8 +218,11 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public update(status: UserStatus | null) {
+  public update(status: UserStatus | null, trajectories?: Record<string, TrajectoryInfo> | null) {
     this._latestStatus = status;
+    if (trajectories !== undefined) {
+      this._trajectories = trajectories;
+    }
     this._updateUsageHistory(status);
     this._updateHtml();
   }
@@ -163,13 +237,67 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     // Update every 1 minute to show more activity in the spikes
     if (now - lastUpdate < 1 * 60 * 1000 && lastUpdate !== 0) return;
 
-    status.modelConfigs.forEach((config) => {
-      let key = config.label;
-      // Map keys to match the ones used in _getHtmlForWebview mapping
-      if (key.includes("Gemini") && key.includes("Pro")) key = "Gemini Pro";
-      else if (key.includes("Gemini") && key.includes("Flash")) key = "Gemini Flash";
-      else if (key.includes("Claude")) key = "Claude Opus 4.6";
-      else if (key.toLowerCase().includes("gpt")) key = "GPT OSS";
+    const categories: Array<{
+      key: string;
+      pool: "gemini" | "claude";
+      config?: ModelConfig;
+    }> = [
+      {
+        key: "Gemini Pro",
+        pool: "gemini",
+        config: status.modelConfigs.find(
+          (m) =>
+            m.label.includes("Gemini") &&
+            m.label.includes("Pro") &&
+            m.quotaInfo,
+        ),
+      },
+      {
+        key: "Gemini Flash",
+        pool: "gemini",
+        config: status.modelConfigs.find(
+          (m) =>
+            m.label.includes("Gemini") &&
+            m.label.includes("Flash") &&
+            m.quotaInfo,
+        ),
+      },
+      {
+        key: "Claude Opus 4.6",
+        pool: "claude",
+        config: status.modelConfigs.find(
+          (m) => m.label.includes("Claude") && m.quotaInfo,
+        ),
+      },
+      {
+        key: "GPT OSS",
+        pool: "claude",
+        config: status.modelConfigs.find(
+          (m) => m.label.toLowerCase().includes("gpt") && m.quotaInfo,
+        ),
+      },
+    ];
+
+    // Determine active category from activeModelLabel or activeModel
+    let activeKey: string | undefined;
+    const activeLabel = status.activeModelLabel || status.activeModel || "";
+    if (activeLabel) {
+      if (activeLabel.includes("Gemini") && activeLabel.includes("Pro")) {
+        activeKey = "Gemini Pro";
+      } else if (
+        activeLabel.includes("Gemini") &&
+        activeLabel.includes("Flash")
+      ) {
+        activeKey = "Gemini Flash";
+      } else if (activeLabel.includes("Claude")) {
+        activeKey = "Claude Opus 4.6";
+      } else if (activeLabel.toLowerCase().includes("gpt")) {
+        activeKey = "GPT OSS";
+      }
+    }
+
+    categories.forEach(({ key, pool, config }) => {
+      if (!config) return;
 
       const currentRemaining = config.quotaInfo?.remainingFraction ?? 1;
       const currentResetTime = config.quotaInfo?.resetTime;
@@ -178,9 +306,13 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       // Detect Reset:
       // 1. If we have a last status and the current remaining is GREATER than last seen and high (>= 0.99)
       // 2. OR if resetTime has changed to a later string
-      const isReset = lastStatus && (
-        (currentRemaining > lastStatus.remaining && currentRemaining > 0.99) ||
-        (currentResetTime && lastStatus.resetTime && currentResetTime !== lastStatus.resetTime)
+      const isReset = Boolean(
+        lastStatus &&
+          ((currentRemaining > lastStatus.remaining &&
+            currentRemaining > 0.99) ||
+            (currentResetTime &&
+              lastStatus.resetTime &&
+              currentResetTime !== lastStatus.resetTime)),
       );
 
       if (isReset) {
@@ -191,24 +323,33 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         this._usageHistory[key] = [];
       }
 
-      // Delta calculation: How much was used since last check?
-      // If it's the first time or a reset, delta is 0 relative to "start"
+      // Delta calculation:
       let delta = 0;
       if (lastStatus && !isReset) {
-        delta = Math.max(0, lastStatus.remaining - currentRemaining);
+        const rawDelta = Math.max(0, lastStatus.remaining - currentRemaining);
+        const poolMatchesActive =
+          (pool === "gemini" &&
+            (activeKey === "Gemini Pro" || activeKey === "Gemini Flash")) ||
+          (pool === "claude" &&
+            (activeKey === "Claude Opus 4.6" || activeKey === "GPT OSS"));
+
+        if (poolMatchesActive) {
+          delta = activeKey === key ? rawDelta : 0;
+        } else {
+          delta = rawDelta;
+        }
       }
 
-      // Only push if there's usage OR if we want to show a 0 usage point
       this._usageHistory[key].push(delta);
-      
-      if (this._usageHistory[key].length > 20) {
+
+      while (this._usageHistory[key].length > 20) {
         this._usageHistory[key].shift();
       }
 
       // Update tracker
       this._lastSeenStatus[key] = {
         remaining: currentRemaining,
-        resetTime: currentResetTime
+        resetTime: currentResetTime,
       };
     });
 
@@ -225,6 +366,12 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
   private async _updateHtml() {
     if (!this._view) {
+      return;
+    }
+
+    // If settings modal is open, defer re-rendering HTML to avoid closing/opening glitches
+    if (this._settingsVisible) {
+      this._pendingHtmlUpdate = true;
       return;
     }
 
@@ -290,12 +437,22 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
           });
           const subFiles = subItems.filter((item) => item.isFile());
 
-          html += `<div class="brain-folder">
-                    <div class="tree-item" onclick="toggleFolder(this)">
+          const trajectory = this._trajectories
+            ? this._trajectories[folder.name]
+            : undefined;
+          const folderTitle = trajectory?.summary
+            ? trajectory.summary
+            : folder.name;
+          const stepBadge = trajectory?.stepCount
+            ? `${trajectory.stepCount} steps`
+            : `${subFiles.length}`;
+
+          html += `<div class="brain-folder" data-session-id="${folder.name}">
+                    <div class="tree-item" onclick="toggleFolder(this)" title="${folder.name}">
                         <span class="codicon codicon-folder"></span>
                         <div class="tree-folder-title">
-                            <span>${folder.name}</span>
-                            <span class="tree-count">${subFiles.length}</span>
+                            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 175px;">${folderTitle}</span>
+                            <span class="tree-count">${stepBadge}</span>
                         </div>
                     </div>
                     <div class="tree-guide hidden">`;
@@ -540,7 +697,12 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
     // Helper for sparklines
     const getSparkline = (label: string, color: string) => {
-      const storedHistory = this._usageHistory[label] || [0];
+      const storedHistory =
+        this._usageHistory[label] ||
+        (label.includes("Claude")
+          ? this._usageHistory["Claude Opus 4.6"]
+          : undefined) ||
+        [0];
       const paddingNeeded = 10 - storedHistory.length;
       const firstVal = storedHistory.length > 0 ? storedHistory[0] : 0;
       const history =
@@ -586,6 +748,23 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     };
 
     const config = vscode.workspace.getConfiguration("zeroquota");
+    const initialThreshold = String(
+      config.get<number>("notificationThreshold") ??
+        this._context.globalState.get("zeroquota.notificationThreshold", 25),
+    );
+    const initialNotifyReset = Boolean(
+      config.get<boolean>("notifyOnReset") ??
+        this._context.globalState.get("zeroquota.notifyOnReset", false),
+    );
+    const initialModelPicker = config.get<ModelPickerConfig>("modelPicker", {
+      geminiPro: true,
+      geminiFlash: true,
+      claude: true,
+      gptOss: true,
+    });
+    const initialRefreshRate = config.get<string>("refreshRate", "1m");
+    const initialAdaptivePolling = config.get<boolean>("adaptivePolling", true);
+    const initialAutoSync = config.get<boolean>("autoSyncBrain", true);
 
     return `
 <!DOCTYPE html>
@@ -689,6 +868,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             margin-bottom: 12px;
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .card-header {
@@ -696,6 +876,43 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             justify-content: space-between;
             align-items: center;
             margin-bottom: 16px;
+            transition: margin-bottom 0.2s ease;
+        }
+
+        .card-header.clickable {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .card-header.clickable:hover .card-title {
+            color: var(--neon-green);
+        }
+
+        .toggle-icon {
+            font-size: 11px;
+            margin-right: 2px;
+            color: var(--text-muted);
+            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            display: inline-block;
+        }
+
+        .card.collapsed .toggle-icon {
+            transform: rotate(-90deg);
+        }
+
+        .card.collapsed {
+            flex: 0 0 auto !important;
+            min-height: 0 !important;
+            margin-bottom: 8px !important;
+            padding-bottom: 14px;
+        }
+
+        .card.collapsed .card-header {
+            margin-bottom: 0 !important;
+        }
+
+        .card.collapsed .collapsible-content {
+            display: none !important;
         }
 
         .card-title {
@@ -935,49 +1152,140 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
         .hidden { display: none !important; }
 
-        /* Settings Overlay */
-        #settings-overlay {
-            position: absolute;
+        /* Settings Modal Backdrop & Dialog */
+        #settings-backdrop {
+            position: fixed;
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
-            background: var(--overlay-bg);
-            backdrop-filter: blur(20px);
-            z-index: 100;
-            padding: 24px;
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+            box-sizing: border-box;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+
+        #settings-backdrop.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        #settings-modal {
+            width: 100%;
+            max-width: 420px;
+            max-height: 85vh;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
             display: flex;
             flex-direction: column;
-            transform: translateY(100%);
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            overflow: hidden;
+            transform: scale(0.95);
+            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        #settings-overlay.visible {
-            transform: translateY(0);
+        #settings-backdrop.visible #settings-modal {
+            transform: scale(1);
         }
 
-        .settings-header {
+        .modal-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 24px;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border-subtle);
+            background: rgba(255, 255, 255, 0.02);
         }
 
-        .settings-title {
-            font-size: 16px;
+        .modal-title {
+            font-size: 14px;
             font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-main);
+        }
+
+        .modal-close {
+            cursor: pointer;
+            color: var(--text-muted);
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .modal-close:hover {
+            background: var(--item-hover);
+            color: var(--text-main);
+        }
+
+        .modal-body {
+            padding: 16px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
         }
 
         .setting-group {
-            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
         }
 
         .setting-label {
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
             color: var(--text-muted);
-            margin-bottom: 8px;
+            margin: 0;
             display: block;
+        }
+
+        .setting-description {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.4;
+            margin: 0;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-top: 1px solid var(--border-subtle);
+            background: rgba(255, 255, 255, 0.02);
+            gap: 8px;
+        }
+
+        .save-indicator {
+            font-size: 11px;
+            color: var(--neon-green);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .save-indicator.show {
+            opacity: 1;
         }
 
         select {
@@ -1064,109 +1372,149 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             <span class="header-brand-text">ZeroQuota</span>
         </div>
         <div class="header-actions">
-            <span class="codicon codicon-settings-gear" onclick="toggleSettings()"></span>
+            <span class="codicon codicon-settings-gear" onclick="toggleSettings(event)"></span>
         </div>
     </div>
 
-    <!-- Settings Overlay -->
-    <div id="settings-overlay">
-        <div class="settings-header">
-            <div class="settings-title">Settings</div>
-            <span class="codicon codicon-close" onclick="toggleSettings()" style="cursor: pointer;"></span>
-        </div>
-        
-        <div class="setting-group">
-            <label class="setting-label">Quota Notification Threshold</label>
-            <select id="threshold-select" onchange="toggleCustomThreshold()">
-                <option value="0">None</option>
-                <option value="10">10% Remaining</option>
-                <option value="25">25% Remaining</option>
-                <option value="50">50% Remaining</option>
-                <option value="custom">Custom...</option>
-            </select>
-            <div id="custom-threshold-container" class="custom-input-group">
-                <div class="custom-input-wrapper">
-                    <input type="number" id="custom-threshold-input" class="custom-input" placeholder="e.g. 15" min="1" max="99" onchange="saveSettings()">
-                    <span class="custom-input-suffix">%</span>
+    <!-- Settings Modal Dialog -->
+    <div id="settings-backdrop"${settingsVisible ? ' class="visible"' : ''} onclick="handleBackdropClick(event)">
+        <div id="settings-modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <span class="codicon codicon-settings-gear" style="color: var(--neon-green);"></span>
+                    Settings
+                </div>
+                <span class="codicon codicon-close modal-close" onclick="toggleSettings(event)" title="Close (Esc)"></span>
+            </div>
+            
+            <div class="modal-body">
+                <!-- Group 1: Notifications -->
+                <div class="setting-group">
+                    <label class="setting-label">Quota Threshold Notification</label>
+                    <select id="threshold-select" onchange="toggleCustomThreshold()">
+                        <option value="0">Disabled (None)</option>
+                        <option value="10">10% Remaining</option>
+                        <option value="25">25% Remaining</option>
+                        <option value="50">50% Remaining</option>
+                        <option value="custom">Custom...</option>
+                    </select>
+                    <div id="custom-threshold-container" class="custom-input-group" style="display: none; margin-top: 6px;">
+                        <div class="custom-input-wrapper">
+                            <input type="number" id="custom-threshold-input" class="custom-input" placeholder="e.g. 15" min="1" max="99" onchange="saveSettings()">
+                            <span class="custom-input-suffix">%</span>
+                        </div>
+                    </div>
+                    <p class="setting-description">
+                        Receive a notification when any active model drops below this remaining quota level.
+                    </p>
+                    
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-main); margin-top: 6px; cursor: pointer;">
+                        <input type="checkbox" id="notify-reset" onchange="saveSettings()"> 
+                        Notify me when quotas are fully reset
+                    </label>
+                </div>
+
+                <!-- Group 2: Model Picker -->
+                <div class="setting-group">
+                    <label class="setting-label">Visible Models</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; color: var(--text-main);">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="model-geminipro" onchange="saveSettings()"> Gemini Pro
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="model-geminiflash" onchange="saveSettings()"> Gemini Flash
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="model-claude" onchange="saveSettings()"> Claude
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="model-gptoss" onchange="saveSettings()"> GPT OSS
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Group 3: Refresh Rate -->
+                <div class="setting-group">
+                    <label class="setting-label">Polling Refresh Rate</label>
+                    <select id="refreshrate-select" onchange="saveSettings()">
+                        <option value="Real-time">Real-time (10s)</option>
+                        <option value="1m">1 minute</option>
+                        <option value="5m">5 minutes</option>
+                        <option value="Manual">Manual only</option>
+                    </select>
+
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-main); margin-top: 8px; cursor: pointer;">
+                        <input type="checkbox" id="adaptive-polling" onchange="saveSettings()"> 
+                        Smart adaptive polling (save CPU & battery when exhausted)
+                    </label>
+                    <p class="setting-description">
+                        When all quotas hit 0%, automatically steps down polling frequency and wakes up near the reset time.
+                    </p>
+                </div>
+
+                <!-- Group 4: Brain Sync -->
+                <div class="setting-group">
+                    <label style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-main); cursor: pointer;">
+                        <span>Auto-Sync Brain Folder</span>
+                        <input type="checkbox" id="autosync-checkbox" onchange="saveSettings()">
+                    </label>
+                    <p class="setting-description">
+                        Periodically scan and display conversations and checkpoints in ~/.gemini/antigravity/brain.
+                    </p>
                 </div>
             </div>
-            <p style="font-size: 10px; color: var(--text-muted); margin-top: 8px; margin-bottom: 12px;">
-                You will receive a notification when your model quota drops below this level.
-            </p>
-            
-            <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-main);">
-                <input type="checkbox" id="notify-reset" onchange="saveSettings()"> 
-                Notify me when quotas are fully reset
-            </label>
-        </div>
 
-        <div class="setting-group">
-            <label class="setting-label">Model Picker</label>
-            <div style="display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: var(--text-main);">
-                <label style="display: flex; align-items: center; gap: 8px;">
-                    <input type="checkbox" id="model-geminipro" onchange="saveSettings()"> Gemini Pro
-                </label>
-                <label style="display: flex; align-items: center; gap: 8px;">
-                    <input type="checkbox" id="model-geminiflash" onchange="saveSettings()"> Gemini Flash
-                </label>
-                <label style="display: flex; align-items: center; gap: 8px;">
-                    <input type="checkbox" id="model-claude" onchange="saveSettings()"> Claude
-                </label>
-                <label style="display: flex; align-items: center; gap: 8px;">
-                    <input type="checkbox" id="model-gptoss" onchange="saveSettings()"> GPT OSS
-                </label>
+            <div class="modal-footer">
+                <div class="save-indicator" id="save-indicator">
+                    <span class="codicon codicon-check"></span>
+                    <span>Saved</span>
+                </div>
+                <div style="display: flex; gap: 8px; margin-left: auto;">
+                    <button class="btn" style="background: transparent; border: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 11px; padding: 6px 10px;" onclick="openAdvancedSettings()">Advanced...</button>
+                    <button class="btn btn-primary" style="padding: 6px 14px; font-size: 12px;" onclick="toggleSettings(event)">Done</button>
+                </div>
             </div>
-        </div>
-
-        <div class="setting-group">
-            <label class="setting-label">Refresh Rate</label>
-            <select id="refreshrate-select" onchange="saveSettings()">
-                <option value="Real-time">Real-time</option>
-                <option value="1m">1m</option>
-                <option value="5m">5m</option>
-                <option value="Manual">Manual</option>
-            </select>
-        </div>
-
-        <div class="setting-group">
-            <label class="setting-label" style="display: flex; justify-content: space-between; align-items: center;">
-                Auto-Sync Brain
-                <input type="checkbox" id="autosync-checkbox" onchange="saveSettings()">
-            </label>
-        </div>
-        
-        <div style="margin-top: auto; padding-bottom: 20px;">
-            <button class="btn btn-primary" style="width: 100%;" onclick="toggleSettings()">Done</button>
         </div>
     </div>
 
-    <div class="scrollable" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; padding-right: 4px;">
+    <div class="scrollable" style="flex: 1; display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; padding-right: 4px;">
         <!-- Plan Info Card -->
         <div class="card" style="display: flex; align-items: center; gap: 16px; padding: 16px; margin-bottom: 20px;">
-            <div style="width: 48px; height: 48px; border-radius: 50%; background: var(--neon-faint); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                <span class="codicon codicon-account" style="color: var(--neon-green); font-size: 24px;"></span>
+            <div style="width: 48px; height: 48px; border-radius: 50%; background: var(--neon-faint); display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden;">
+                ${status?.profilePictureUrl
+                    ? `<img src="${status.profilePictureUrl}" alt="Avatar" style="width: 100%; height: 100%; object-fit: cover;" />`
+                    : `<span class="codicon codicon-account" style="color: var(--neon-green); font-size: 24px;"></span>`
+                }
             </div>
-            <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
+            <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 14px; font-weight: 700; color: var(--text-main);">Account</span>
-                    <span style="font-size: 10px; font-weight: 800; color: var(--neon-green); background: var(--neon-badge); border: 1px solid var(--neon-border); padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">${tier}</span>
+                    <span style="font-size: 14px; font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${status?.name ? status.name.trim().split(/\s+/)[0] : "Account"}</span>
+                    <span style="font-size: 10px; font-weight: 800; color: var(--neon-green); background: var(--neon-badge); border: 1px solid var(--neon-border); padding: 2px 6px; border-radius: 4px; text-transform: uppercase; flex-shrink: 0;">${tier}</span>
                 </div>
-                <span style="font-size: 11px; font-weight: 500; color: var(--text-muted);">${email}</span>
+                <span style="font-size: 11px; font-weight: 500; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${email}</span>
+                ${(status?.promptCredits || status?.flowCredits) ? `
+                <div style="display: flex; gap: 10px; margin-top: 4px; font-size: 10px; color: var(--text-muted);">
+                    <span title="Prompt Credits (Available / Total)">⚡ <strong>${status.availablePromptCredits}</strong>/${status.promptCredits}</span>
+                    <span title="Flow Credits (Available / Total)">🌊 <strong>${status.availableFlowCredits}</strong>/${status.flowCredits}</span>
+                </div>
+                ` : ""}
             </div>
         </div>
 
         <!-- Model Usage Card -->
-        <div class="card">
-            <div class="card-header">
+        <div class="card ${this._collapsedSections['model-usage'] ? 'collapsed' : ''}" id="model-usage-card">
+            <div class="card-header clickable" onclick="toggleSection('model-usage')" title="Click to collapse / expand">
                 <div class="card-title">
+                    <span class="codicon codicon-chevron-down toggle-icon" id="model-usage-chevron"></span>
                     <span class="codicon codicon-zap" style="color: var(--neon-green)"></span>
                     Model Usage
                 </div>
-                <div class="card-actions">
+                <div class="card-actions" onclick="event.stopPropagation()">
                     <span class="codicon codicon-info" title="• Real-time API quota telemetry&#10;• High-fidelity burn-rate tracking&#10;• Spikes show token use intensity&#10;• Resets follow provider cycles"></span>
                 </div>
             </div>
 
+            <div class="collapsible-content" id="model-usage-content">
             ${
               config.get<ModelPickerConfig>("modelPicker", {})?.geminiPro !== false
                 ? `
@@ -1258,28 +1606,32 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             `
                 : ""
             }
+            </div>
         </div>
 
         <!-- Brain Directory Card -->
-        <div class="card" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; margin-bottom: 0;">
-            <div class="card-header">
+        <div class="card ${this._collapsedSections['brain-directory'] ? 'collapsed' : ''}" id="brain-directory-card" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; margin-bottom: 0; min-height: 90px;">
+            <div class="card-header clickable" onclick="toggleSection('brain-directory')" title="Click to collapse / expand">
                 <div class="card-title">
+                    <span class="codicon codicon-chevron-down toggle-icon" id="brain-directory-chevron"></span>
                     <span class="codicon codicon-folder-active"></span>
                     Brain Directory
                 </div>
-                <div style="display: flex; align-items: center; gap: 6px;">
+                <div style="display: flex; align-items: center; gap: 6px;" onclick="event.stopPropagation()">
                     <span id="folder-count-badge" class="tree-count">${folderCount} Folders</span>
                     <span class="codicon codicon-info" title="• Implementation plans & task logs&#10;• Shared media & conversation assets&#10;• Organized naturally by session&#10;• Persistent workspace storage" style="font-size: 11px; cursor: help; color: var(--text-muted); opacity: 0.8;"></span>
                 </div>
             </div>
 
-            <div class="search-container">
-                <input type="text" class="search-input" id="brainSearch" placeholder="Search directory..." oninput="filterBrain()">
-                <span class="codicon codicon-search search-icon"></span>
-            </div>
+            <div class="collapsible-content" id="brain-directory-content" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
+                <div class="search-container">
+                    <input type="text" class="search-input" id="brainSearch" placeholder="Search directory..." oninput="filterBrain()">
+                    <span class="codicon codicon-search search-icon"></span>
+                </div>
 
-            <div class="tree-container" id="brain-tree">
-                ${brainHtml}
+                <div class="tree-container" id="brain-tree">
+                    ${brainHtml}
+                </div>
             </div>
         </div>
     </div>
@@ -1289,10 +1641,18 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             <span class="codicon codicon-sync"></span> Refresh Quotas
         </button>
         <div class="btn-row">
-            <button class="btn" onclick="sendMessage('mcp')">
+            <button class="btn" onclick="sendMessage('rules')" title="Open Antigravity Rules (GEMINI.md)">
+                <span class="codicon codicon-book"></span> Rules
+            </button>
+            <button class="btn" onclick="sendMessage('skills')" title="Open Antigravity Skills">
+                <span class="codicon codicon-symbol-event"></span> Skills
+            </button>
+        </div>
+        <div class="btn-row">
+            <button class="btn" onclick="sendMessage('mcp')" title="Open MCP Server Configuration">
                 <span class="codicon codicon-circuit-board"></span> MCP
             </button>
-            <button class="btn" onclick="sendMessage('reload')">
+            <button class="btn" onclick="sendMessage('reload')" title="Reload Antigravity IDE Window">
                 <span class="codicon codicon-refresh"></span> Reload IDE
             </button>
         </div>
@@ -1306,6 +1666,43 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         function openFile(path) {
             vscode.postMessage({ command: 'openFile', path: path });
         }
+
+        function toggleSection(sectionId) {
+            const card = document.getElementById(sectionId + '-card');
+            if (!card) return;
+            const isCollapsed = card.classList.toggle('collapsed');
+            
+            try {
+                localStorage.setItem('zeroquota.collapsed.' + sectionId, isCollapsed ? 'true' : 'false');
+                const state = vscode.getState() || {};
+                state['collapsed_' + sectionId] = isCollapsed;
+                vscode.setState(state);
+            } catch (e) {}
+
+            vscode.postMessage({
+                command: 'persistSectionState',
+                section: sectionId,
+                collapsed: isCollapsed
+            });
+        }
+
+        (function restoreSectionStates() {
+            ['model-usage', 'brain-directory'].forEach(sectionId => {
+                try {
+                    const saved = localStorage.getItem('zeroquota.collapsed.' + sectionId);
+                    if (saved !== null) {
+                        const card = document.getElementById(sectionId + '-card');
+                        if (card) {
+                            if (saved === 'true') {
+                                card.classList.add('collapsed');
+                            } else {
+                                card.classList.remove('collapsed');
+                            }
+                        }
+                    }
+                } catch (e) {}
+            });
+        })();
 
         function toggleFolder(el) {
             const guide = el.parentElement.querySelector('.tree-guide');
@@ -1323,6 +1720,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             folders.forEach(folder => {
                 const titleEl = folder.querySelector('.tree-folder-title span:first-child');
                 const title = titleEl ? titleEl.innerText.toLowerCase() : "";
+                const sessionId = folder.getAttribute('data-session-id') ? folder.getAttribute('data-session-id').toLowerCase() : "";
                 const files = folder.querySelectorAll('.brain-file');
                 let hasVisibleFile = false;
 
@@ -1336,7 +1734,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
                     }
                 });
 
-                if (title.includes(query) || hasVisibleFile) {
+                if (title.includes(query) || sessionId.includes(query) || hasVisibleFile) {
                     folder.classList.remove('hidden');
                     if (query.length > 0) {
                         folder.querySelector('.tree-guide').classList.remove('hidden');
@@ -1363,19 +1761,49 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         
         // Apply initial state
         if (isSettingsVisible) {
-            document.getElementById('settings-overlay').classList.add('visible');
+            document.getElementById('settings-backdrop').classList.add('visible');
         }
 
-        function toggleSettings() {
-            const overlay = document.getElementById('settings-overlay');
+        function toggleSettings(e) {
+            if (e && e.stopPropagation) {
+                e.stopPropagation();
+            }
+            const backdrop = document.getElementById('settings-backdrop');
             isSettingsVisible = !isSettingsVisible;
             if (isSettingsVisible) {
-                overlay.classList.add('visible');
+                backdrop.classList.add('visible');
             } else {
-                overlay.classList.remove('visible');
+                backdrop.classList.remove('visible');
             }
             // Notify the back-end about state change so it can persist it
             vscode.postMessage({ command: 'persistSettingsState', visible: isSettingsVisible });
+        }
+
+        function handleBackdropClick(e) {
+            if (e.target.id === 'settings-backdrop') {
+                toggleSettings(e);
+            }
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && isSettingsVisible) {
+                toggleSettings(e);
+            }
+        });
+
+        function openAdvancedSettings() {
+            vscode.postMessage({ command: 'openLocalSettings' });
+        }
+
+        function showSavedFeedback() {
+            const indicator = document.getElementById('save-indicator');
+            if (indicator) {
+                indicator.classList.add('show');
+                clearTimeout(indicator._timeout);
+                indicator._timeout = setTimeout(() => {
+                    indicator.classList.remove('show');
+                }, 1500);
+            }
         }
 
         function toggleCustomThreshold() {
@@ -1383,45 +1811,54 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             const customContainer = document.getElementById('custom-threshold-container');
             if (select.value === 'custom') {
                 customContainer.style.display = 'block';
+                const input = document.getElementById('custom-threshold-input');
+                if (input) input.focus();
             } else {
                 customContainer.style.display = 'none';
                 saveSettings();
             }
         }
 
+        let saveTimeout = null;
         function saveSettings() {
-            let threshold = document.getElementById('threshold-select').value;
-            if (threshold === 'custom') {
-                threshold = document.getElementById('custom-threshold-input').value;
-            }
-            const notifyOnReset = document.getElementById('notify-reset').checked;
-            
-            const modelGeminiPro = document.getElementById('model-geminipro').checked;
-            const modelGeminiFlash = document.getElementById('model-geminiflash').checked;
-            const modelClaude = document.getElementById('model-claude').checked;
-            const modelGptOss = document.getElementById('model-gptoss').checked;
-            const refreshRate = document.getElementById('refreshrate-select').value;
-            const autoSync = document.getElementById('autosync-checkbox').checked;
-
-            vscode.postMessage({ 
-                command: 'saveSettings', 
-                settings: {
-                    threshold,
-                    notifyOnReset,
-                    modelPicker: {
-                        geminiPro: modelGeminiPro,
-                        geminiFlash: modelGeminiFlash,
-                        claude: modelClaude,
-                        gptOss: modelGptOss
-                    },
-                    refreshRate,
-                    autoSyncBrain: autoSync
+            showSavedFeedback();
+            if (saveTimeout) clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => {
+                let threshold = document.getElementById('threshold-select').value;
+                if (threshold === 'custom') {
+                    threshold = document.getElementById('custom-threshold-input').value;
                 }
-            });
+                const notifyOnReset = document.getElementById('notify-reset').checked;
+                
+                const modelGeminiPro = document.getElementById('model-geminipro').checked;
+                const modelGeminiFlash = document.getElementById('model-geminiflash').checked;
+                const modelClaude = document.getElementById('model-claude').checked;
+                const modelGptOss = document.getElementById('model-gptoss').checked;
+                const refreshRate = document.getElementById('refreshrate-select').value;
+                const adaptivePolling = document.getElementById('adaptive-polling').checked;
+                const autoSync = document.getElementById('autosync-checkbox').checked;
+
+                vscode.postMessage({ 
+                    command: 'saveSettings', 
+                    settings: {
+                        threshold,
+                        notifyOnReset,
+                        modelPicker: {
+                            geminiPro: modelGeminiPro,
+                            geminiFlash: modelGeminiFlash,
+                            claude: modelClaude,
+                            gptOss: modelGptOss
+                        },
+                        refreshRate,
+                        adaptivePolling,
+                        autoSyncBrain: autoSync
+                    }
+                });
+            }, 100);
         }
 
         // Load initial settings
-        const initialThreshold = "${this._context.globalState.get("zeroquota.notificationThreshold", "25")}";
+        const initialThreshold = ${JSON.stringify(initialThreshold)};
         const thresholdSelect = document.getElementById('threshold-select');
         const customInput = document.getElementById('custom-threshold-input');
         
@@ -1433,19 +1870,15 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
             customInput.value = initialThreshold;
         }
         
-        const initialNotifyReset = ${this._context.globalState.get("zeroquota.notifyOnReset", false) ? "true" : "false"};
-        document.getElementById('notify-reset').checked = initialNotifyReset;
-
-        // Note: The rest of the settings are Workspace Configurations, not Global State
-        const config = ${JSON.stringify(vscode.workspace.getConfiguration("zeroquota"))};
+        document.getElementById('notify-reset').checked = ${initialNotifyReset};
+        document.getElementById('model-geminipro').checked = ${initialModelPicker?.geminiPro ?? true};
+        document.getElementById('model-geminiflash').checked = ${initialModelPicker?.geminiFlash ?? true};
+        document.getElementById('model-claude').checked = ${initialModelPicker?.claude ?? true};
+        document.getElementById('model-gptoss').checked = ${initialModelPicker?.gptOss ?? true};
         
-        document.getElementById('model-geminipro').checked = config.modelPicker?.geminiPro ?? true;
-        document.getElementById('model-geminiflash').checked = config.modelPicker?.geminiFlash ?? true;
-        document.getElementById('model-claude').checked = config.modelPicker?.claude ?? true;
-        document.getElementById('model-gptoss').checked = config.modelPicker?.gptOss ?? true;
-        
-        document.getElementById('refreshrate-select').value = config.refreshRate || "1m";
-        document.getElementById('autosync-checkbox').checked = config.autoSyncBrain ?? true;
+        document.getElementById('refreshrate-select').value = ${JSON.stringify(initialRefreshRate)};
+        document.getElementById('adaptive-polling').checked = ${initialAdaptivePolling};
+        document.getElementById('autosync-checkbox').checked = ${initialAutoSync};
     </script>
 </body>
 </html>`;

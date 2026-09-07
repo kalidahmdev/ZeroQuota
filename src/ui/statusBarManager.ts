@@ -7,7 +7,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { UserStatus } from "../types";
+import { UserStatus, ModelPickerConfig } from "../types";
 import { getQuotaColor, getQuotaEmoji, getThemeColor } from "./utils";
 
 export class StatusBarManager {
@@ -37,38 +37,57 @@ export class StatusBarManager {
     }
 
     const configs = status.modelConfigs;
+    const modelPicker = vscode.workspace
+      .getConfiguration("zeroquota")
+      .get<ModelPickerConfig>("modelPicker", {
+        geminiPro: true,
+        geminiFlash: true,
+        claude: true,
+        gptOss: true,
+      });
 
-    // Find principal models for status bar display
-    const pro = configs.find((m) => m.label.includes("Pro (High)"));
-    const flash = configs.find((m) => m.label.includes("Gemini 3 Flash"));
-    const opus = configs.find((m) => m.label.includes("Claude Opus"));
+    // Antigravity groups quotas into shared pools:
+    // 1. Gemini pool (shared by Gemini Pro and Gemini Flash)
+    // 2. Claude pool (shared by Claude and GPT-OSS)
+    const pro = configs.find((m) => m.label.includes("Pro (High)") || (m.label.includes("Pro") && m.label.includes("Gemini")));
+    const flash = configs.find((m) => m.label.includes("Flash"));
+    const anyGemini = configs.find((m) => m.label.includes("Gemini"));
+    const opus = configs.find((m) => m.label.includes("Claude"));
+    const gpt = configs.find((m) => m.label.toLowerCase().includes("gpt"));
 
     const parts: string[] = [];
 
-    if (pro?.quotaInfo) {
-      const bFrac = pro.quotaInfo.remainingFraction;
-      const frac = isNaN(bFrac) ? 0 : bFrac;
-      const pct = Math.round(frac * 100);
-      const timer = this.formatResetTime(pro.quotaInfo.resetTime);
-      parts.push(`${getQuotaEmoji(frac)} Pro ${pct}% ${timer}`);
+    // Group 1: Gemini pool (Gemini Pro & Flash share quota)
+    const showPro = modelPicker?.geminiPro !== false;
+    const showFlash = modelPicker?.geminiFlash !== false;
+    if (showPro || showFlash) {
+      const geminiModel = (showPro && pro?.quotaInfo) ? pro : (showFlash && flash?.quotaInfo ? flash : (pro?.quotaInfo ? pro : (flash?.quotaInfo ? flash : anyGemini)));
+      if (geminiModel?.quotaInfo) {
+        const bFrac = geminiModel.quotaInfo.remainingFraction;
+        const frac = isNaN(bFrac) ? 0 : bFrac;
+        const pct = Math.round(frac * 100);
+        const timer = this.formatResetTime(geminiModel.quotaInfo.resetTime);
+        const label = !showPro && showFlash ? "Flash" : (showPro && !showFlash ? "Pro" : "Gemini");
+        parts.push(`${getQuotaEmoji(frac)} ${label} ${pct}% ${timer}`);
+      }
     }
 
-    if (flash?.quotaInfo) {
-      const bFrac = flash.quotaInfo.remainingFraction;
-      const frac = isNaN(bFrac) ? 0 : bFrac;
-      const pct = Math.round(frac * 100);
-      const timer = this.formatResetTime(flash.quotaInfo.resetTime);
-      parts.push(`${getQuotaEmoji(frac)} Flash ${pct}% ${timer}`);
+    // Group 2: Claude pool (Claude & GPT share quota)
+    const showClaude = modelPicker?.claude !== false;
+    const showGpt = modelPicker?.gptOss !== false;
+    if (showClaude || showGpt) {
+      const claudeModel = (showClaude && opus?.quotaInfo) ? opus : (showGpt && gpt?.quotaInfo ? gpt : (opus?.quotaInfo ? opus : gpt));
+      if (claudeModel?.quotaInfo) {
+        const bFrac = claudeModel.quotaInfo.remainingFraction;
+        const frac = isNaN(bFrac) ? 0 : bFrac;
+        const pct = Math.round(frac * 100);
+        const timer = this.formatResetTime(claudeModel.quotaInfo.resetTime);
+        const label = !showClaude && showGpt ? "GPT" : "Claude";
+        parts.push(`${getQuotaEmoji(frac)} ${label} ${pct}% ${timer}`);
+      }
     }
 
-    if (opus?.quotaInfo) {
-      const bFrac = opus.quotaInfo.remainingFraction;
-      const frac = isNaN(bFrac) ? 0 : bFrac;
-      const timer = this.formatResetTime(opus.quotaInfo.resetTime);
-      parts.push(`${getQuotaEmoji(frac)} Claude ${timer}`);
-    }
-
-    this.statusBarItem.text = parts.join(" | ");
+    this.statusBarItem.text = parts.length > 0 ? parts.join(" | ") : "$(sparkle) ZeroQuota";
 
     this.statusBarItem.color = undefined;
 
@@ -120,7 +139,8 @@ export class StatusBarManager {
     md.appendMarkdown(`<div style="margin-bottom: 2px;">`);
     const accTitleColor = isLight ? "#333333" : "#ffffff";
     const accTierColor = isLight ? "#666666" : "#e2e8f0";
-    md.appendMarkdown(`<strong style="font-size: 13px; color: ${accTitleColor};">Account</strong>`);
+    const displayName = status.name ? status.name.trim().split(/\s+/)[0] : "Account";
+    md.appendMarkdown(`<strong style="font-size: 13px; color: ${accTitleColor};">${displayName}</strong>`);
     md.appendMarkdown(`&nbsp;&nbsp;`);
     md.appendMarkdown(`<span style="font-size: 12px; color: ${accTierColor}; font-weight: 500;">${status.tier}</span>`);
     md.appendMarkdown(`</div>`);
@@ -129,7 +149,8 @@ export class StatusBarManager {
     
     md.appendMarkdown(`<td align="right" style="vertical-align: middle; text-align: right;">`);
     md.appendMarkdown(`<div style="background: rgba(204, 255, 0, 0.08); border-radius: 50%; padding: 4px; display: inline-block;">`);
-    md.appendMarkdown(`<img src="${accountIconSvg}" width="28" height="28" style="display: block;" />`);
+    const avatarSrc = status.profilePictureUrl || accountIconSvg;
+    md.appendMarkdown(`<img src="${avatarSrc}" width="28" height="28" style="border-radius: 50%; display: block;" />`);
     md.appendMarkdown(`</div>`);
     md.appendMarkdown(`</td>`);
     
@@ -147,17 +168,30 @@ export class StatusBarManager {
     const itemsToDisplay: { displayName: string, frac: number, pct: number, reset: string }[] = [];
     const displayedModels = new Set<string>();
 
+    const modelPicker = vscode.workspace
+      .getConfiguration("zeroquota")
+      .get<ModelPickerConfig>("modelPicker", {
+        geminiPro: true,
+        geminiFlash: true,
+        claude: true,
+        gptOss: true,
+      });
+
     for (const m of status.modelConfigs) {
       if (!m.quotaInfo) continue;
 
       let displayName = m.label;
       if (m.label.includes("Gemini") && m.label.includes("Pro")) {
+        if (modelPicker?.geminiPro === false) continue;
         displayName = "Gemini Pro";
       } else if (m.label.includes("Gemini") && m.label.includes("Flash")) {
+        if (modelPicker?.geminiFlash === false) continue;
         displayName = "Gemini Flash";
       } else if (m.label.includes("Claude")) {
+        if (modelPicker?.claude === false) continue;
         displayName = "Claude Opus 4.6";
       } else if (m.label.toLowerCase().includes("gpt")) {
+        if (modelPicker?.gptOss === false) continue;
         displayName = "GPT OSS";
       } else {
         displayName = m.label.replace(/\(.*\)/, "").trim();
@@ -318,6 +352,7 @@ export class StatusBarManager {
     if (!resetTimeStr) return "N/A";
     try {
       const resetDate = new Date(resetTimeStr);
+      if (isNaN(resetDate.getTime())) return "N/A";
       const now = new Date();
       const diffMs = resetDate.getTime() - now.getTime();
 

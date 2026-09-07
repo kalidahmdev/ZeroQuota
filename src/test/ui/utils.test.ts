@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { getQuotaColor, getQuotaEmoji } from '../../ui/utils';
+import * as vscode from 'vscode';
+import { getQuotaColor, getQuotaEmoji, getThemeColor } from '../../ui/utils';
 
 describe('Utils Tests', () => {
   describe('getQuotaColor', () => {
@@ -32,4 +33,23 @@ describe('Utils Tests', () => {
       expect(getQuotaEmoji(0.8)).toBe('🟩');
     });
   });
-});
+
+  describe('getThemeColor', () => {
+    it('returns black for brand neon in light theme', () => {
+      (vscode.window as any).activeColorTheme = { kind: vscode.ColorThemeKind.Light };
+      expect(getThemeColor('#ccff00')).toBe('#000000');
+      expect(getThemeColor('Premium Neon')).toBe('#000000');
+    });
+
+    it('preserves neon green in dark theme', () => {
+      (vscode.window as any).activeColorTheme = { kind: vscode.ColorThemeKind.Dark };
+      expect(getThemeColor('#ccff00')).toBe('#ccff00');
+    });
+
+    it('preserves non-neon colors in light theme', () => {
+      (vscode.window as any).activeColorTheme = { kind: vscode.ColorThemeKind.Light };
+      expect(getThemeColor('#f87171')).toBe('#f87171');
+      expect(getThemeColor('#fbbf24')).toBe('#fbbf24');
+    });
+  });
+});

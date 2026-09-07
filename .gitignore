@@ -6,6 +6,7 @@ out/
 dist/
 build/
 lib/
+*.vsix
 
 # IDE and Editor files
 .vscode/*
