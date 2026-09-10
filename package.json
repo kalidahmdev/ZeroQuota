@@ -148,7 +148,7 @@
     "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^7.14.1",
     "@typescript-eslint/parser": "^7.14.1",
-    "@vitest/coverage-v8": "^4.1.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "@vscode/test-electron": "^2.4.0",
     "@vscode/vsce": "^3.7.1",
     "axios-mock-adapter": "^2.1.0",
@@ -160,7 +160,7 @@
     "sinon": "^17.0.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.44",
