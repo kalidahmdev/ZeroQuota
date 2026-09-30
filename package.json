@@ -140,6 +140,15 @@
     "test": "vitest run",
     "test:full": "npm run pretest && vitest run"
   },
+  "overrides": {
+    "undici": "7.29.1",
+    "fast-uri": "3.1.8",
+    "ip-address": "10.7.1",
+    "brace-expansion@^1.0.0": "1.1.21",
+    "brace-expansion@^2.0.0": "2.1.7",
+    "brace-expansion@^4.0.0": "5.0.12",
+    "brace-expansion@^5.0.0": "5.0.12"
+  },
   "devDependencies": {
     "@types/chai": "^4.3.20",
     "@types/mocha": "^10.0.10",
