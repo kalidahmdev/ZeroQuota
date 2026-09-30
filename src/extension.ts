@@ -13,6 +13,39 @@ import { Orchestrator } from "./core/orchestrator";
 
 let orchestrator: Orchestrator;
 
+/**
+ * Candidate global skills directories, checked in priority order. The first
+ * one that exists wins. When none exist, CANDIDATE_SKILLS_PATHS[0] is treated
+ * as the canonical directory and scaffolded.
+ */
+export const CANDIDATE_SKILLS_PATHS: string[] = [
+  path.join(os.homedir(), ".gemini", "config", "skills"),
+  path.join(os.homedir(), ".gemini", "antigravity", "skills"),
+  path.join(os.homedir(), ".gemini", "config", "workflows"),
+  path.join(os.homedir(), ".gemini", "config", "global_workflows"),
+  path.join(os.homedir(), ".gemini", "skills"),
+];
+
+/**
+ * Resolve the global skills directory using a priority-ordered fallback chain.
+ * Returns the first candidate that exists, or scaffolds the canonical
+ * `~/.gemini/config/skills` directory when none exist.
+ */
+export async function resolveGlobalSkillsPath(): Promise<string> {
+  for (const candidate of CANDIDATE_SKILLS_PATHS) {
+    try {
+      await fs.promises.access(candidate);
+      return candidate;
+    } catch {
+      // directory does not exist - continue
+    }
+  }
+
+  const canonical = CANDIDATE_SKILLS_PATHS[0];
+  await fs.promises.mkdir(canonical, { recursive: true });
+  return canonical;
+}
+
 export async function activate(context: vscode.ExtensionContext) {
   console.log("[ZeroQuota] Extension activated in Antigravity IDE");
 
@@ -102,20 +135,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       if (!targetPath) {
-        const globalSkills = path.join(os.homedir(), ".gemini", "skills");
-        const globalWorkflows = path.join(os.homedir(), ".gemini", "workflows");
-        if (fs.existsSync(globalSkills)) {
-          targetPath = globalSkills;
-        } else if (fs.existsSync(globalWorkflows)) {
-          targetPath = globalWorkflows;
-        } else {
-          try {
-            if (!fs.existsSync(globalSkills)) fs.mkdirSync(globalSkills, { recursive: true });
-            targetPath = globalSkills;
-          } catch {
-            targetPath = globalSkills;
-          }
-        }
+        targetPath = await resolveGlobalSkillsPath();
       }
 
       vscode.env.openExternal(vscode.Uri.file(targetPath));

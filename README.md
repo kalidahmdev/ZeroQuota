@@ -14,6 +14,7 @@
   <a href="#-key-features">Key Features</a> •
   <a href="#-configuration">Configuration</a> •
   <a href="#-commands">Commands</a> •
+  <a href="#-global-skills">Global Skills</a> •
   <a href="#-how-it-works">How It Works</a> •
   <a href="#-getting-started">Getting Started</a> •
   <a href="#-testing">Testing</a>
@@ -87,7 +88,7 @@ ZeroQuota is built specifically for **Google Antigravity**. With the release of 
 | :--- | :--- |
 | **MCP Config Hub** | Opens `~/.gemini/config/mcp_config.json` (or legacy path), automatically creating directory and starter config if absent. |
 | **Rules Editor** | Opens workspace `GEMINI.md` or global `~/.gemini/GEMINI.md` to quickly configure agent rules. |
-| **Skills & Workflows** | Fast navigation to `.agents/skills`, `.agents/workflows`, or global `~/.gemini/skills`. |
+| **Skills & Workflows** | Fast navigation to workspace `.agents/skills` / `.agents/workflows`, or the global skills directory resolved from the priority-ordered fallback chain (canonical `~/.gemini/config/skills`). |
 | **Brain Inspector** | Direct access to the local Antigravity brain directory (`~/.gemini/antigravity/brain`). |
 | **Session Trajectories** | Inspect recent Antigravity Cascade trajectories with step counts and timestamps. |
 
@@ -100,6 +101,7 @@ Configure ZeroQuota via Settings (`Ctrl+,` / `Cmd+,` searching for `ZeroQuota`),
 | Setting | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `zeroquota.refreshRate` | `string` | `"1m"` | Polling frequency (`"Real-time"`, `"1m"`, `"5m"`, `"Manual"`). |
+| `zeroquota.autoUpdateInterval` | `integer` | `60` | Polling interval in seconds for quota updates. |
 | `zeroquota.adaptivePolling` | `boolean` | `true` | Throttles polling when quotas are at 0% and wakes up at reset time to save CPU & battery. |
 | `zeroquota.notificationThreshold` | `integer` | `25` | Percentage threshold to trigger low-quota warning notifications (e.g. 5, 10, 15, 25, 50). |
 | `zeroquota.notifyOnReset` | `boolean` | `false` | Shows desktop notification when Antigravity AI quotas recover to 100%. |
@@ -115,9 +117,25 @@ Configure ZeroQuota via Settings (`Ctrl+,` / `Cmd+,` searching for `ZeroQuota`),
 | `zeroquota.refresh` | `ZeroQuota: Refresh Quota` | Force an immediate poll and refresh all UI components. |
 | `zeroquota.openMcpConfig` | `ZeroQuota: Open MCP Config` | Open `mcp_config.json` with auto-creation. |
 | `zeroquota.openRules` | `ZeroQuota: Open Rules (GEMINI.md)` | Open workspace or global Antigravity rules. |
-| `zeroquota.openSkills` | `ZeroQuota: Open Antigravity Skills` | Open project or global agent skills directory. |
+| `zeroquota.openSkills` | `ZeroQuota: Open Antigravity Skills` | Open project or globally resolved agent skills directory. |
 | `zeroquota.openWorkflows` | `ZeroQuota: Open Workflows (Legacy)` | Backwards-compatible alias for agent skills. |
 | `zeroquota.openBrain` | `ZeroQuota: Open Brain Folder` | Open the Antigravity local brain cache folder. |
+
+---
+
+## 🌐 Global Skills
+
+When no workspace skills directory is found, `zeroquota.openSkills` resolves the global skills
+directory using a **priority-ordered fallback chain**. The first directory that exists wins:
+
+1. `~/.gemini/config/skills` *(canonical)*
+2. `~/.gemini/antigravity/skills`
+3. `~/.gemini/config/workflows`
+4. `~/.gemini/config/global_workflows`
+5. `~/.gemini/skills`
+
+When **none** of the candidate directories exist, ZeroQuota scaffolds the canonical
+`~/.gemini/config/skills` directory (creating it recursively) and opens that path.
 
 ---
 
@@ -180,7 +198,7 @@ ZeroQuota communicates directly with the local Antigravity sidecar via gRPC-web 
 
 ## 🧪 Testing & Quality Assurance
 
-ZeroQuota includes an automated dual test suite with 39 tests covering all orchestrator states, process discovery, sidecar communication, and status bar logic:
+ZeroQuota includes an automated dual test suite with 74 tests covering all orchestrator states, process discovery, sidecar communication, and status bar logic:
 
 ```bash
 # Run unit & integration tests with linting and compilation

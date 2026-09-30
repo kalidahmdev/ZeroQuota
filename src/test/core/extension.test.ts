@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { activate, deactivate } from '../../extension';
+import { activate, deactivate, resolveGlobalSkillsPath, CANDIDATE_SKILLS_PATHS } from '../../extension';
 
 describe('Extension Activation & Developer Hub Tests', () => {
   let context: any;
@@ -145,20 +145,66 @@ describe('Extension Activation & Developer Hub Tests', () => {
     expect(openExternalStub.calledWith(sinon.match((uri: any) => uri.fsPath === skillsPath))).toBe(true);
   });
 
-  it('zeroquota.openSkills falls back to global skills and creates directory if missing', async () => {
+  it('zeroquota.openSkills falls back to canonical global skills and scaffolds when no candidates exist', async () => {
     await activate(context);
 
     (vscode.workspace as any).workspaceFolders = [];
-    const globalSkills = path.join(os.homedir(), '.gemini', 'skills');
+    const canonicalSkills = path.join(os.homedir(), '.gemini', 'config', 'skills');
 
-    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
-    const mkdirSpy = vi.spyOn(fs, 'mkdirSync').mockReturnValue(undefined as any);
+    const accessSpy = vi.spyOn(fs.promises, 'access').mockRejectedValue(new Error('ENOENT'));
+    const mkdirSpy = vi.spyOn(fs.promises, 'mkdir').mockResolvedValue(undefined as any);
     const openExternalStub = sinon.stub(vscode.env, 'openExternal');
 
     await commandHandlers['zeroquota.openSkills']();
 
-    expect(mkdirSpy).toHaveBeenCalledWith(globalSkills, { recursive: true });
-    expect(openExternalStub.calledWith(sinon.match((uri: any) => uri.fsPath === globalSkills))).toBe(true);
+    expect(accessSpy).toHaveBeenCalledTimes(CANDIDATE_SKILLS_PATHS.length);
+    expect(mkdirSpy).toHaveBeenCalledWith(canonicalSkills, { recursive: true });
+    expect(openExternalStub.calledWith(sinon.match((uri: any) => uri.fsPath === canonicalSkills))).toBe(true);
+  });
+
+  it('resolveGlobalSkillsPath scaffolds the canonical path with recursive mkdir when no candidates exist', async () => {
+    const canonicalSkills = path.join(os.homedir(), '.gemini', 'config', 'skills');
+
+    vi.spyOn(fs.promises, 'access').mockRejectedValue(new Error('ENOENT'));
+    const mkdirSpy = vi.spyOn(fs.promises, 'mkdir').mockResolvedValue(undefined as any);
+
+    const result = await resolveGlobalSkillsPath();
+
+    expect(result).toBe(canonicalSkills);
+    expect(mkdirSpy).toHaveBeenCalledWith(canonicalSkills, { recursive: true });
+  });
+
+  it('resolveGlobalSkillsPath returns the first existing candidate in priority order', async () => {
+    const canonicalSkills = path.join(os.homedir(), '.gemini', 'config', 'skills');
+    const antigravitySkills = path.join(os.homedir(), '.gemini', 'antigravity', 'skills');
+
+    vi.spyOn(fs.promises, 'access').mockImplementation(async (p: any) => {
+      if (p === antigravitySkills) return;
+      throw new Error('ENOENT');
+    });
+    const mkdirSpy = vi.spyOn(fs.promises, 'mkdir').mockResolvedValue(undefined as any);
+
+    const result = await resolveGlobalSkillsPath();
+
+    expect(result).toBe(antigravitySkills);
+    expect(result).not.toBe(canonicalSkills);
+    expect(mkdirSpy).not.toHaveBeenCalled();
+  });
+
+  it('resolveGlobalSkillsPath prefers the canonical path when it already exists', async () => {
+    const canonicalSkills = path.join(os.homedir(), '.gemini', 'config', 'skills');
+    const legacySkills = path.join(os.homedir(), '.gemini', 'skills');
+
+    vi.spyOn(fs.promises, 'access').mockImplementation(async (p: any) => {
+      if (p === canonicalSkills || p === legacySkills) return;
+      throw new Error('ENOENT');
+    });
+    const mkdirSpy = vi.spyOn(fs.promises, 'mkdir').mockResolvedValue(undefined as any);
+
+    const result = await resolveGlobalSkillsPath();
+
+    expect(result).toBe(canonicalSkills);
+    expect(mkdirSpy).not.toHaveBeenCalled();
   });
 
   it('zeroquota.openWorkflows delegates to zeroquota.openSkills', async () => {

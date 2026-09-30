@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+- Changed global skills path resolution to use a priority-ordered fallback chain
+  (`~/.gemini/config/skills` > `~/.gemini/antigravity/skills` > `~/.gemini/config/workflows` >
+  `~/.gemini/config/global_workflows` > `~/.gemini/skills`). When no candidate exists,
+  `~/.gemini/config/skills` is created automatically.
+
+---
+
 ## [2.0.0] - 2026-09-07
 
 ### 🚀 Major Milestone & Highlights
@@ -38,7 +48,7 @@ ZeroQuota v2.0 brings full **Google Antigravity** support to **VS Code** (via th
 - **Antigravity Quick Action Developer Hub**:
   - `zeroquota.openMcpConfig`: Open `~/.gemini/config/mcp_config.json` (auto-scaffolds template if missing).
   - `zeroquota.openRules`: Open workspace or global `GEMINI.md`.
-  - `zeroquota.openSkills`: Open workspace `.agents/skills` or global `~/.gemini/skills`.
+  - `zeroquota.openSkills`: Open workspace `.agents/skills` or the legacy global skills directory (`~/.gemini/skills`).
   - `zeroquota.openWorkflows`: Quick alias for skills navigation.
   - `zeroquota.openBrain`: Open the Antigravity brain directory.
 - **Revamped Glassmorphism Dashboard UI**:
@@ -46,7 +56,7 @@ ZeroQuota v2.0 brings full **Google Antigravity** support to **VS Code** (via th
   - Interactive quick-settings drawer with backdrop dismissal, keyboard shortcuts (`Esc`), and instant save indicator.
   - Model visibility toggles and refresh rate selectors.
 - **Dual Testing Suite**:
-  - 39 unit and integration tests passing under Vitest with comprehensive mocks for VS Code, WMI, PowerShell, and sidecar endpoints.
+  - 74 unit and integration tests passing under Vitest with comprehensive mocks for VS Code, WMI, PowerShell, and sidecar endpoints.
 
 ### Changed
 - Refactored `Orchestrator` to support dynamic delay rescheduling and state latching for quota warnings.
