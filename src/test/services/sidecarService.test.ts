@@ -34,12 +34,12 @@ describe('SidecarService Tests', () => {
     vi.unstubAllGlobals();
   });
 
-  it('discovers server on Unix using ps aux', async () => {
+  it('discovers server on Unix using ps auxww', async () => {
     vi.stubGlobal('process', { ...process, platform: 'linux' });
     
     const mockPsOutput = 'user 1234 0.0 0.0 ... language_server --csrf_token xyz-789 --extension_server_port 9090\n';
     execStub.callsFake((cmd, _options, callback) => {
-      if (cmd === 'ps aux') {
+      if (cmd === 'ps auxww') {
         callback(null, mockPsOutput, '');
       }
       return {};
@@ -192,7 +192,7 @@ describe('SidecarService Tests', () => {
 
     const mockPsOutput = 'user 9876 0.0 0.0 1000 2000 pts/0 S 12:00 0:00 agy --hub --hub-port 54321 --app_data_dir antigravity\n';
     execStub.callsFake((cmd, _options, callback) => {
-      if (cmd === 'ps aux') {
+      if (cmd === 'ps auxww') {
         callback(null, mockPsOutput, '');
       }
       return {};

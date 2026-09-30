@@ -26,6 +26,12 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     "model-usage": false,
     "brain-directory": true,
   };
+  // Offline fallback cache for conversation titles read from disk, keyed by
+  // folder name and invalidated by the transcript's mtime.
+  private _diskTrajectoryCache: Record<
+    string,
+    { mtimeMs: number; info: TrajectoryInfo | null }
+  > = {};
 
   constructor(private readonly _context: vscode.ExtensionContext) {
     // Initialize usage history and last status from global state
@@ -437,9 +443,17 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
           });
           const subFiles = subItems.filter((item) => item.isFile());
 
-          const trajectory = this._trajectories
+          const rpcTrajectory = this._trajectories
             ? this._trajectories[folder.name]
             : undefined;
+          // Prefer live RPC metadata, then fall back to the on-disk transcript
+          // so sessions still show a human-readable title when the sidecar is
+          // unavailable (e.g. macOS discovery failures).
+          const trajectory =
+            rpcTrajectory && rpcTrajectory.summary
+              ? rpcTrajectory
+              : (await this._getDiskTrajectory(folder.name, folderPath)) ||
+                rpcTrajectory;
           const folderTitle = trajectory?.summary
             ? trajectory.summary
             : folder.name;
@@ -451,7 +465,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
                     <div class="tree-item" onclick="toggleFolder(this)" title="${folder.name}">
                         <span class="codicon codicon-folder"></span>
                         <div class="tree-folder-title">
-                            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 175px;">${folderTitle}</span>
+                            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 175px;">${this._escapeHtml(folderTitle)}</span>
                             <span class="tree-count">${stepBadge}</span>
                         </div>
                     </div>
@@ -510,6 +524,130 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     }
 
     return { html, count: folderCount };
+  }
+
+  private _escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  /**
+   * Reads a conversation title from the local transcript when the sidecar
+   * cannot provide one. Results are cached by transcript mtime so repeated
+   * renders stay cheap.
+   */
+  private async _getDiskTrajectory(
+    folderName: string,
+    folderPath: string,
+  ): Promise<TrajectoryInfo | null> {
+    const transcriptPath = path.join(
+      folderPath,
+      ".system_generated",
+      "logs",
+      "transcript.jsonl",
+    );
+
+    try {
+      const stats = await fs.promises.stat(transcriptPath);
+      const cached = this._diskTrajectoryCache[folderName];
+      if (cached && cached.mtimeMs === stats.mtimeMs) {
+        return cached.info;
+      }
+
+      const info = await this._readTrajectoryFromTranscript(transcriptPath);
+      this._diskTrajectoryCache[folderName] = {
+        mtimeMs: stats.mtimeMs,
+        info,
+      };
+      return info;
+    } catch {
+      return null;
+    }
+  }
+
+  private async _readTrajectoryFromTranscript(
+    transcriptPath: string,
+  ): Promise<TrajectoryInfo | null> {
+    // Bound the read: transcripts can grow to many megabytes and we only need
+    // the opening user request plus an approximate step count.
+    const MAX_BYTES = 128 * 1024;
+    const buffer = Buffer.alloc(MAX_BYTES);
+
+    try {
+      const handle = await fs.promises.open(transcriptPath, "r");
+      try {
+        const { bytesRead } = await handle.read(buffer, 0, MAX_BYTES, 0);
+        if (bytesRead <= 0) return null;
+
+        const lines = buffer
+          .subarray(0, bytesRead)
+          .toString("utf8")
+          .split("\n");
+
+        let summary: string | undefined;
+        let stepCount = 0;
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          let step: { type?: string; content?: unknown };
+          try {
+            step = JSON.parse(trimmed);
+          } catch {
+            // Ignore malformed or partially-written trailing lines.
+            continue;
+          }
+
+          stepCount++;
+          if (
+            !summary &&
+            step.type === "USER_INPUT" &&
+            typeof step.content === "string"
+          ) {
+            summary = this._extractPromptTitle(step.content);
+          }
+        }
+
+        if (!summary) return null;
+        return { summary, stepCount };
+      } finally {
+        await handle.close().catch(() => undefined);
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  private _extractPromptTitle(content: string): string | undefined {
+    // The opening step wraps the prompt in <USER_REQUEST> tags and appends
+    // metadata blocks that should never appear in the title.
+    let text = content;
+    const metadataIdx = text.indexOf("<ADDITIONAL_METADATA>");
+    if (metadataIdx !== -1) {
+      text = text.slice(0, metadataIdx);
+    }
+    const settingsIdx = text.indexOf("<USER_SETTINGS_CHANGE>");
+    if (settingsIdx !== -1) {
+      text = text.slice(0, settingsIdx);
+    }
+
+    const requestMatch = text.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/i);
+    if (requestMatch) {
+      text = requestMatch[1];
+    }
+
+    text = text
+      .replace(/<\/?USER_REQUEST>/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!text) return undefined;
+    return text.length > 120 ? `${text.slice(0, 120)}…` : text;
   }
 
   private _formatResetTime(resetTimeStr?: string): string {

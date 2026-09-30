@@ -164,7 +164,21 @@ export class Orchestrator {
 
   async refresh() {
     const status = await this.sidecar.fetchUserStatus();
+
+    // Fetch trajectories independently of user status so that a discovery
+    // failure does not prevent the Brain Directory from receiving session
+    // metadata (titles / step counts).
+    let trajectories: Record<string, TrajectoryInfo> | null = null;
+    if (typeof this.sidecar.fetchTrajectories === "function") {
+      try {
+        trajectories = await this.sidecar.fetchTrajectories();
+      } catch {
+        trajectories = null;
+      }
+    }
+
     if (!status) {
+      this.dashboard.update(null, trajectories);
       this.scheduleNextPoll();
       return;
     }
@@ -231,14 +245,6 @@ export class Orchestrator {
     // Update UI components
     this.statusBar.update(status);
 
-    let trajectories: Record<string, TrajectoryInfo> | null = null;
-    if (typeof this.sidecar.fetchTrajectories === "function") {
-      try {
-        trajectories = await this.sidecar.fetchTrajectories();
-      } catch {
-        trajectories = null;
-      }
-    }
     this.dashboard.update(status, trajectories);
 
     // Schedule next poll based on remaining quota and reset timing
