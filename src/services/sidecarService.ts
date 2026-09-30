@@ -126,7 +126,9 @@ export class SidecarService {
           }
         }
       } else {
-        const { stdout } = await execAsync("ps aux");
+        // `-ww` prevents BSD/Darwin `ps` from truncating commands at 80 columns
+        // when stdout is not an interactive TTY (as with child_process.exec).
+        const { stdout } = await execAsync("ps auxww");
         for (const line of stdout.split("\n")) {
           if (
             (line.includes("language_server") && line.includes("--csrf_token")) ||
@@ -204,8 +206,14 @@ export class SidecarService {
           ports.add(match[1]);
         }
       } else {
+        const isDarwin = process.platform === "darwin";
         try {
-          const { stdout } = await execAsync(`lsof -i -P -n -a -p ${pid}`);
+          // GUI apps on macOS may not have /usr/sbin on PATH, so fall back to
+          // the absolute lsof path before giving up.
+          const lsofCmd = isDarwin
+            ? `lsof -i -P -n -a -p ${pid} 2>/dev/null || /usr/sbin/lsof -i -P -n -a -p ${pid}`
+            : `lsof -i -P -n -a -p ${pid}`;
+          const { stdout } = await execAsync(lsofCmd);
           for (const line of stdout.split("\n")) {
             if (line.includes("LISTEN")) {
               const match = line.match(/:(\d+)\s+/);
@@ -213,11 +221,14 @@ export class SidecarService {
             }
           }
         } catch {
-          const { stdout } = await execAsync("netstat -tunlp");
-          const pattern = new RegExp(`:(\d+)\s+.*\s+${pid}/`, "g");
-          let match;
-          while ((match = pattern.exec(stdout)) !== null) {
-            ports.add(match[1]);
+          // BSD `netstat` does not support `-tunlp`; only Linux provides that fallback.
+          if (process.platform === "linux") {
+            const { stdout } = await execAsync("netstat -tunlp");
+            const pattern = new RegExp(`:(\\d+)\\s+.*${pid}/`, "g");
+            let match;
+            while ((match = pattern.exec(stdout)) !== null) {
+              ports.add(match[1]);
+            }
           }
         }
       }
