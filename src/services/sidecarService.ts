@@ -19,7 +19,10 @@ const execAsync = (
   return new Promise((resolve, reject) => {
     child_process.exec(
       cmd,
-      options,
+      // Bound every spawn so a hung shell (PowerShell/CIM stall, WMI/EDR filter,
+      // netstat/lsof) can never leave the promise pending forever. Callers may
+      // still override these via `options`.
+      { timeout: 5000, windowsHide: true, ...options },
       (
         error: child_process.ExecException | null,
         stdout: string | Buffer,

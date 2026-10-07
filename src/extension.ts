@@ -50,7 +50,6 @@ export async function activate(context: vscode.ExtensionContext) {
   console.log("[ZeroQuota] Extension activated in Antigravity IDE");
 
   orchestrator = new Orchestrator(context);
-  await orchestrator.init();
 
   context.subscriptions.push(
     vscode.commands.registerCommand("zeroquota.refresh", () => {
@@ -163,6 +162,13 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     }),
   );
+
+  // Start the orchestrator without blocking activation. Discovery shells out to
+  // child processes (PowerShell/CIM, netstat, lsof); activation must never wait
+  // on those, so run init fire-and-forget and surface failures via logging.
+  void orchestrator.init().catch((err) => {
+    console.error("[ZeroQuota] init failed", err);
+  });
 }
 
 export function deactivate() {

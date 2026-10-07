@@ -35,7 +35,8 @@ export class Orchestrator {
       vscode.window.registerWebviewViewProvider(
         DashboardViewProvider.viewType,
         this.dashboard
-      )
+      ),
+      this.dashboard,
     );
   }
 
@@ -257,6 +258,7 @@ export class Orchestrator {
       clearTimeout(this.pollInterval);
       this.pollInterval = null;
     }
+    this.dashboard.dispose();
     this.statusBar.dispose();
   }
 }

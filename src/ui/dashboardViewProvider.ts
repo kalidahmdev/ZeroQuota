@@ -11,6 +11,78 @@ import * as os from "os";
 import { UserStatus, ModelConfig, ModelPickerConfig, TrajectoryInfo } from "../types";
 import { getQuotaColor } from "./utils";
 
+/** True for Antigravity metadata sidecars: `*.metadata` and `*.metadata.json`. */
+export function isBrainMetadataFile(name: string): boolean {
+  return /\.metadata(\.json)?$/i.test(name);
+}
+
+/** Always-hidden directory names, at any depth. */
+function isAlwaysHiddenName(name: string): boolean {
+  return name === ".system_generated" || name === "scratch";
+}
+
+/**
+ * Qualification predicate (hide-list).
+ * `uploadedFileNames` is the recursive, already-metadata-filtered list of files
+ * under `.user_uploaded/` (empty subfolders excluded). A brain is visible iff at
+ * least one visible direct file OR at least one uploaded file remains.
+ */
+export function brainHasVisibleContent(
+  directFileNames: string[],
+  uploadedFileNames: string[],
+): boolean {
+  if (uploadedFileNames.some((n) => !isBrainMetadataFile(n))) return true;
+  return directFileNames.some((n) => !isBrainMetadataFile(n));
+}
+
+interface BrainTreeNode {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  children?: BrainTreeNode[];
+}
+
+const MAX_UPLOAD_DEPTH = 8;
+
+/** Recursive, metadata-filtered walk. Guards: depth cap + never follow symlinks. */
+async function collectUploadedTree(
+  dir: string,
+  depth: number,
+): Promise<BrainTreeNode[]> {
+  if (depth > MAX_UPLOAD_DEPTH) return [];
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const nodes: BrainTreeNode[] = [];
+  for (const e of entries) {
+    if (isBrainMetadataFile(e.name)) continue; // req 4
+    if (isAlwaysHiddenName(e.name)) continue; // req 4
+    if (e.isSymbolicLink()) continue; // loop guard: never follow links
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      const children = await collectUploadedTree(full, depth + 1);
+      if (children.length > 0) {
+        nodes.push({ name: e.name, path: full, isDirectory: true, children });
+      }
+      // empty subfolders are pruned (req 3)
+    } else if (e.isFile()) {
+      nodes.push({ name: e.name, path: full, isDirectory: false });
+    }
+  }
+  // deterministic order for stable HTML/tests
+  nodes.sort((a, b) => a.name.localeCompare(b.name));
+  return nodes;
+}
+
+function flattenFileNames(nodes: BrainTreeNode[]): string[] {
+  return nodes.flatMap((n) =>
+    n.isDirectory ? flattenFileNames(n.children ?? []) : [n.name],
+  );
+}
+
 export class DashboardViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "zeroquota.dashboard";
 
@@ -18,6 +90,8 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
   private _latestStatus: UserStatus | null = null;
   private _trajectories: Record<string, TrajectoryInfo> | null = null;
   private _updateInterval?: NodeJS.Timeout;
+  // Guards the periodic refresh against overlapping renders.
+  private _rendering: boolean = false;
   private _usageHistory: Record<string, number[]> = {};
   private _settingsVisible: boolean = false;
   private _pendingHtmlUpdate: boolean = false;
@@ -41,7 +115,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       this._context.globalState.get("zeroquota.lastSeenStatus") || {};
     this._context.subscriptions.push(
       vscode.window.onDidChangeActiveColorTheme(() => {
-        this._updateHtml();
+        this._safeUpdateHtml();
       }),
     );
   }
@@ -59,7 +133,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     };
 
     // Initial render
-    this._updateHtml();
+    this._safeUpdateHtml();
 
     webviewView.webview.onDidReceiveMessage((message) => {
       switch (message.command) {
@@ -102,7 +176,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
           this._settingsVisible = Boolean(message.visible);
           if (wasVisible && !this._settingsVisible && this._pendingHtmlUpdate) {
             this._pendingHtmlUpdate = false;
-            this._updateHtml();
+            this._safeUpdateHtml();
           }
           break;
         }
@@ -205,7 +279,18 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
           .getConfiguration("zeroquota")
           .get<boolean>("autoSyncBrain", true);
         if (autoSync) {
-          this._updateHtml();
+          // Skip if a render is already in flight so full brain walks cannot overlap.
+          if (this._rendering) {
+            return;
+          }
+          this._rendering = true;
+          void this._updateHtml()
+            .catch((err) =>
+              console.error("[ZeroQuota] dashboard render failed", err),
+            )
+            .finally(() => {
+              this._rendering = false;
+            });
         }
       }
     }, 5000);
@@ -219,7 +304,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.onDidChangeVisibility(() => {
       if (this._view?.visible) {
-        this._updateHtml();
+        this._safeUpdateHtml();
       }
     });
   }
@@ -230,7 +315,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       this._trajectories = trajectories;
     }
     this._updateUsageHistory(status);
-    this._updateHtml();
+    this._safeUpdateHtml();
   }
 
   private _updateUsageHistory(status: UserStatus | null) {
@@ -370,6 +455,17 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     this._context.globalState.update("zeroquota.lastHistoryUpdate", now);
   }
 
+  /**
+   * Fire-and-forget entry point for unawaited call sites. Ensures any rejection
+   * from `_updateHtml` is observed and logged instead of becoming an unhandled
+   * rejection that could leave the webview spinning forever.
+   */
+  private _safeUpdateHtml(): void {
+    void this._updateHtml().catch((err) => {
+      console.error("[ZeroQuota] dashboard render failed", err);
+    });
+  }
+
   private async _updateHtml() {
     if (!this._view) {
       return;
@@ -381,26 +477,106 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const { html: brainHtml, count: folderCount } =
-      await this._getBrainDirectoryHtml();
-    this._view.webview.html = this._getHtmlForWebview(
-      this._latestStatus,
-      brainHtml,
-      folderCount,
-      this._settingsVisible,
-    );
+    try {
+      const { html: brainHtml, count: folderCount } =
+        await this._getBrainDirectoryHtml();
+
+      // The view may have been disposed while awaiting the brain walk.
+      if (!this._view) {
+        return;
+      }
+
+      this._view.webview.html = this._getHtmlForWebview(
+        this._latestStatus,
+        brainHtml,
+        folderCount,
+        this._settingsVisible,
+      );
+    } catch (err) {
+      // Never leave the webview without HTML: log and show a visible error state.
+      console.error("[ZeroQuota] dashboard render failed", err);
+      if (!this._view) {
+        return;
+      }
+      try {
+        this._view.webview.html = this._getErrorHtmlForWebview(err);
+      } catch (fallbackErr) {
+        console.error(
+          "[ZeroQuota] dashboard fallback render failed",
+          fallbackErr,
+        );
+      }
+    }
   }
 
-  private async _getBrainDirectoryHtml(): Promise<{
+  /** Minimal, valid webview HTML shown when the normal render throws. */
+  private _getErrorHtmlForWebview(err: unknown): string {
+    const message =
+      err instanceof Error ? err.message : String(err ?? "Unknown error");
+    let iconUri = "";
+    try {
+      iconUri = String(
+        this._view?.webview.asWebviewUri(
+          vscode.Uri.joinPath(
+            this._context.extensionUri,
+            "assets",
+            "icons",
+            "ZeroQuota.svg",
+          ),
+        ) ?? "",
+      );
+    } catch {
+      iconUri = "";
+    }
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZeroQuota</title>
+    <style>
+        body {
+            font-family: var(--vscode-font-family), sans-serif;
+            color: var(--vscode-foreground);
+            background: var(--vscode-sideBar-background);
+            padding: 16px;
+            margin: 0;
+        }
+        .error-card {
+            border: 1px solid var(--vscode-editorWidget-border);
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .error-title {
+            font-weight: 600;
+            margin: 8px 0 8px 0;
+        }
+        .error-detail {
+            font-family: monospace;
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+    </style>
+</head>
+<body>
+    ${iconUri ? `<img src="${iconUri}" alt="ZeroQuota" width="40" height="40" />` : ""}
+    <div class="error-card">
+        <div class="error-title">ZeroQuota dashboard failed to render</div>
+        <div class="error-detail">${this._escapeHtml(message)}</div>
+    </div>
+</body>
+</html>`;
+  }
+
+  private async _getBrainDirectoryHtml(rootOverride?: string): Promise<{
     html: string;
     count: number;
   }> {
-    const brainPath = path.join(
-      os.homedir(),
-      ".gemini",
-      "antigravity",
-      "brain",
-    );
+    const brainPath =
+      rootOverride ??
+      path.join(os.homedir(), ".gemini", "antigravity", "brain");
 
     let html = "";
     let folderCount = 0;
@@ -428,40 +604,67 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
       itemsWithStats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 
       const folders = itemsWithStats
-        .filter((i) => i.item.isDirectory())
+        .filter((i) => i.item.isDirectory() && !isAlwaysHiddenName(i.item.name))
         .map((i) => i.item);
-      folderCount = folders.length;
+
+      // root standalone files stay visible, metadata-filtered
       const files = itemsWithStats
-        .filter((i) => i.item.isFile())
+        .filter((i) => i.item.isFile() && !isBrainMetadataFile(i.item.name))
         .map((i) => i.item);
 
       for (const folder of folders) {
         const folderPath = path.join(brainPath, folder.name);
+        let uploadedTree: BrainTreeNode[] = [];
+        let visibleDirect: string[] = [];
         try {
           const subItems = await fs.promises.readdir(folderPath, {
             withFileTypes: true,
           });
-          const subFiles = subItems.filter((item) => item.isFile());
 
-          const rpcTrajectory = this._trajectories
-            ? this._trajectories[folder.name]
-            : undefined;
-          // Prefer live RPC metadata, then fall back to the on-disk transcript
-          // so sessions still show a human-readable title when the sidecar is
-          // unavailable (e.g. macOS discovery failures).
-          const trajectory =
-            rpcTrajectory && rpcTrajectory.summary
-              ? rpcTrajectory
-              : (await this._getDiskTrajectory(folder.name, folderPath)) ||
-                rpcTrajectory;
-          const folderTitle = trajectory?.summary
-            ? trajectory.summary
-            : folder.name;
-          const stepBadge = trajectory?.stepCount
-            ? `${trajectory.stepCount} steps`
-            : `${subFiles.length}`;
+          const directFileNames = subItems
+            .filter((i) => i.isFile())
+            .map((i) => i.name);
+          visibleDirect = directFileNames.filter(
+            (n) => !isBrainMetadataFile(n),
+          );
 
-          html += `<div class="brain-folder" data-session-id="${folder.name}">
+          const uploadPath = path.join(folderPath, ".user_uploaded");
+          if (fs.existsSync(uploadPath)) {
+            uploadedTree = await collectUploadedTree(uploadPath, 0);
+          }
+          const uploadedFileNames = flattenFileNames(uploadedTree);
+
+          // Req 1: hidden entirely — no row, no Empty placeholder.
+          if (!brainHasVisibleContent(directFileNames, uploadedFileNames)) {
+            continue;
+          }
+        } catch {
+          continue; // unreadable session → emit nothing (replaces "Error reading")
+        }
+
+        folderCount++; // counted only when visible (req 5)
+
+        const rpcTrajectory = this._trajectories
+          ? this._trajectories[folder.name]
+          : undefined;
+        // Prefer live RPC metadata, then fall back to the on-disk transcript
+        // so sessions still show a human-readable title when the sidecar is
+        // unavailable (e.g. macOS discovery failures).
+        const trajectory =
+          rpcTrajectory && rpcTrajectory.summary
+            ? rpcTrajectory
+            : (await this._getDiskTrajectory(folder.name, folderPath)) ||
+              rpcTrajectory;
+        const folderTitle = trajectory?.summary
+          ? trajectory.summary
+          : folder.name;
+
+        // Req 7: blank when unknown — never "0", no file-count fallback.
+        const stepBadge = trajectory?.stepCount
+          ? `${trajectory.stepCount} steps`
+          : "";
+
+        html += `<div class="brain-folder" data-session-id="${folder.name}">
                     <div class="tree-item" onclick="toggleFolder(this)" title="${folder.name}">
                         <span class="codicon codicon-folder"></span>
                         <div class="tree-folder-title">
@@ -471,49 +674,32 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
                     </div>
                     <div class="tree-guide hidden">`;
 
-          for (const file of subFiles) {
-            const filePath = path.join(folderPath, file.name);
-            const ext = path.extname(file.name).toLowerCase();
-            let iconClass = "codicon-file";
-            if (ext === ".md") iconClass = "codicon-markdown";
-            else if (
-              [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"].includes(ext)
-            )
-              iconClass = "codicon-file-media";
-
-            html += `<div class="tree-item brain-file" onclick="openFile('${filePath.replace(/\\/g, "\\\\")}')">
-                        <span class="codicon ${iconClass}"></span>
-                        <span>${file.name}</span>
-                    </div>`;
-          }
-
-          if (subFiles.length === 0) {
-            html += `<div class="empty-state">Empty</div>`;
-          }
-
-          html += `</div></div>`;
-        } catch (e) {
-          html += `<div class="empty-state">Error reading</div>`;
+        for (const name of visibleDirect) {
+          html += this._renderBrainFile(path.join(folderPath, name), name);
         }
+
+        if (uploadedTree.length > 0) {
+          html += `<div class="brain-subfolder" data-subfolder=".user_uploaded">
+                        <div class="tree-item" onclick="toggleFolder(this)" title=".user_uploaded">
+                            <span class="codicon codicon-folder"></span>
+                            <div class="tree-folder-title"><span>.user_uploaded</span></div>
+                        </div>
+                        <div class="tree-guide hidden">${this._renderBrainNodes(uploadedTree)}</div>
+                    </div>`;
+        }
+
+        html += `</div></div>`;
       }
 
       for (const file of files) {
-        const filePath = path.join(brainPath, file.name);
-        const ext = path.extname(file.name).toLowerCase();
-        let iconClass = "codicon-file";
-        if (ext === ".md") iconClass = "codicon-markdown";
-        else if (
-          [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"].includes(ext)
-        )
-          iconClass = "codicon-file-media";
-
-        html += `<div class="tree-item brain-file standalone" onclick="openFile('${filePath.replace(/\\/g, "\\\\")}')">
-                <span class="codicon ${iconClass}"></span>
-                <span>${file.name}</span>
-            </div>`;
+        html += this._renderBrainFile(
+          path.join(brainPath, file.name),
+          file.name,
+          "standalone",
+        );
       }
 
-      if (folders.length === 0 && files.length === 0) {
+      if (folderCount === 0 && files.length === 0) {
         html += `<div class="empty-state">Empty brain directory</div>`;
       }
     } catch (e) {
@@ -524,6 +710,46 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     }
 
     return { html, count: folderCount };
+  }
+
+  private _renderBrainFile(
+    filePath: string,
+    name: string,
+    extraClass = "",
+  ): string {
+    const ext = path.extname(name).toLowerCase();
+    let iconClass = "codicon-file";
+    if (ext === ".md") iconClass = "codicon-markdown";
+    else if (
+      [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"].includes(ext)
+    ) {
+      iconClass = "codicon-file-media";
+    }
+    const className = extraClass
+      ? `tree-item brain-file ${extraClass}`
+      : "tree-item brain-file";
+    return `<div class="${className}" onclick="openFile('${filePath.replace(/\\/g, "\\\\")}')">
+                <span class="codicon ${iconClass}"></span>
+                <span>${name}</span>
+            </div>`;
+  }
+
+  private _renderBrainNodes(nodes: BrainTreeNode[]): string {
+    let html = "";
+    for (const n of nodes) {
+      if (n.isDirectory) {
+        html += `<div class="brain-subfolder">
+                    <div class="tree-item" onclick="toggleFolder(this)" title="${this._escapeHtml(n.name)}">
+                        <span class="codicon codicon-folder"></span>
+                        <div class="tree-folder-title"><span>${this._escapeHtml(n.name)}</span></div>
+                    </div>
+                    <div class="tree-guide hidden">${this._renderBrainNodes(n.children ?? [])}</div>
+                </div>`;
+      } else {
+        html += this._renderBrainFile(n.path, n.name);
+      }
+    }
+    return html;
   }
 
   private _escapeHtml(value: string): string {
@@ -1853,46 +2079,71 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
         function filterBrain() {
             const query = document.getElementById('brainSearch').value.toLowerCase();
             const folders = document.querySelectorAll('.brain-folder');
+            const subfolders = document.querySelectorAll('.brain-subfolder');
             const standaloneFiles = document.querySelectorAll('.brain-file.standalone');
 
+            // Pass 1: toggle every file node (any depth).
+            document.querySelectorAll('.brain-file').forEach(file => {
+                const name = file.querySelector('span:last-child').innerText.toLowerCase();
+                file.classList.toggle('hidden', !name.includes(query));
+            });
+
+            // Pass 2: bottom-up — a subfolder is visible if its title matches OR it has a
+            // non-hidden descendant file. Process deepest first so parents see children.
+            const subList = Array.from(subfolders).sort((a, b) =>
+                depthOf(b) - depthOf(a)
+            );
+            subList.forEach(sf => {
+                const title = sf.querySelector('.tree-folder-title span').innerText.toLowerCase();
+                const hasVisibleChild = Array.from(sf.querySelectorAll('.brain-file'))
+                    .some(f => !f.classList.contains('hidden'));
+                sf.classList.toggle('hidden', !(title.includes(query) || hasVisibleChild));
+            });
+
+            // Pass 3: brains.
             folders.forEach(folder => {
                 const titleEl = folder.querySelector('.tree-folder-title span:first-child');
-                const title = titleEl ? titleEl.innerText.toLowerCase() : "";
-                const sessionId = folder.getAttribute('data-session-id') ? folder.getAttribute('data-session-id').toLowerCase() : "";
-                const files = folder.querySelectorAll('.brain-file');
-                let hasVisibleFile = false;
+                const title = titleEl ? titleEl.innerText.toLowerCase() : '';
+                const sessionId = (folder.getAttribute('data-session-id') || '').toLowerCase();
+                const hasVisibleFile = Array.from(folder.querySelectorAll('.brain-file'))
+                    .some(f => !f.classList.contains('hidden'));
+                const hasVisibleSub = Array.from(folder.querySelectorAll('.brain-subfolder'))
+                    .some(s => !s.classList.contains('hidden'));
 
-                files.forEach(file => {
-                    const fileName = file.querySelector('span:last-child').innerText.toLowerCase();
-                    if (fileName.includes(query)) {
-                        file.classList.remove('hidden');
-                        hasVisibleFile = true;
-                    } else {
-                        file.classList.add('hidden');
-                    }
-                });
+                const visible = title.includes(query) || sessionId.includes(query) ||
+                                hasVisibleFile || hasVisibleSub;
+                folder.classList.toggle('hidden', !visible);
 
-                if (title.includes(query) || sessionId.includes(query) || hasVisibleFile) {
-                    folder.classList.remove('hidden');
-                    if (query.length > 0) {
-                        folder.querySelector('.tree-guide').classList.remove('hidden');
-                        const icon = folder.querySelector('.codicon');
+                if (query.length > 0 && visible) {
+                    // Req 6: auto-expand every ancestor guide at any depth.
+                    folder.querySelectorAll('.tree-guide').forEach(g => g.classList.remove('hidden'));
+                    folder.querySelectorAll('.codicon-folder').forEach(icon => {
                         icon.classList.remove('codicon-folder');
                         icon.classList.add('codicon-folder-opened');
-                    }
-                } else {
-                    folder.classList.add('hidden');
+                    });
                 }
             });
 
+            if (query.length === 0) {
+                // Deterministic reset: guides collapsed, all nodes shown, icons closed.
+                document.querySelectorAll('.tree-guide').forEach(g => g.classList.add('hidden'));
+                document.querySelectorAll('.brain-subfolder').forEach(s => s.classList.remove('hidden'));
+                document.querySelectorAll('.codicon-folder-opened').forEach(icon => {
+                    icon.classList.remove('codicon-folder-opened');
+                    icon.classList.add('codicon-folder');
+                });
+            }
+
             standaloneFiles.forEach(file => {
-                const fileName = file.querySelector('span:last-child').innerText.toLowerCase();
-                if (fileName.includes(query)) {
-                    file.classList.remove('hidden');
-                } else {
-                    file.classList.add('hidden');
-                }
+                const name = file.querySelector('span:last-child').innerText.toLowerCase();
+                file.classList.toggle('hidden', !name.includes(query));
             });
+        }
+
+        function depthOf(el) {
+            let d = 0;
+            for (let p = el.parentElement; p; p = p.parentElement) d++;
+            return d;
         }
 
         let isSettingsVisible = ${settingsVisible ? "true" : "false"};
@@ -2020,5 +2271,14 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     </script>
 </body>
 </html>`;
+  }
+
+  /** Clears the refresh interval so it cannot leak past extension deactivate. */
+  public dispose(): void {
+    if (this._updateInterval) {
+      clearInterval(this._updateInterval);
+      this._updateInterval = undefined;
+    }
+    this._view = undefined;
   }
 }
